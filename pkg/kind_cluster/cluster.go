@@ -2,8 +2,12 @@ package kind_cluster
 
 import (
 	"github.com/pkg/errors"
+	"io/ioutil"
+	"os"
 	"strings"
 )
+
+var defaultKubeConfig = os.ExpandEnv("${HOME}/.kube/config")
 
 type Cluster struct {
 	name string
@@ -52,9 +56,15 @@ func (c *Cluster) Exists() (exists bool, err error) {
 //
 // At most one of `TakeOver` and `Recreate` can be true
 // If both are false then New() wil fail
+//
+// If KubeConfigFile is a path to an existing file it will be overwritten.
+// New() will NOT overwrite the default ~/.kube/config.
+//
+// Note that the cluster will always be added to the active kubeconfig file.
 type Options struct {
-	TakeOver bool // if true, take over an existing cluster with same name
-	Recreate bool // if true, delete existing cluster and create a new one
+	TakeOver       bool   // if true, take over an existing cluster with same name
+	Recreate       bool   // if true, delete existing cluster and create a new one
+	KubeConfigFile string // if not empty, save cluster's kubeconfig to a file
 }
 
 // New - create a new cluster
@@ -73,24 +83,47 @@ func New(name string, options Options) (cluster *Cluster, err error) {
 		return
 	}
 
+	if options.KubeConfigFile == defaultKubeConfig {
+		err = errors.New("can't overwite default kubeconfig")
+		return
+	}
+
 	cluster = &Cluster{name: name}
 	exists, err := cluster.Exists()
 	if err != nil {
 		return
 	}
 
+	var output string
 	// Delete existing cluster if options.Recreate is true and sets exists to false
 	if exists && options.Recreate {
-		_, err = run("delete", "cluster", "--name", name)
+		output, err = run("delete", "cluster", "--name", name)
 		if err != nil {
+			err = errors.Wrap(err, output)
 			return
 		}
 		exists = false
 	}
 
+	// At the end, if the cluster was created successfully write its kubeconfig to a file if needed
+	defer func() {
+		if err != nil || options.KubeConfigFile == "" {
+			return
+		}
+
+		kubeConfig, err := run("get", "kubeconfig", "--name", name)
+		if err != nil {
+			return
+		}
+		err = ioutil.WriteFile(options.KubeConfigFile, []byte(kubeConfig), 0644)
+	}()
+
 	// Create a new cluster if no cluster with the same name exists and return
 	if !exists {
-		_, err = run("create", "cluster", "--name", name)
+		output, err = run("create", "cluster", "--name", name)
+		if err != nil {
+			err = errors.Wrap(err, output)
+		}
 		return
 	}
 

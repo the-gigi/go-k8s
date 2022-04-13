@@ -1,10 +1,14 @@
 package kind_cluster
 
 import (
+	"bytes"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/pkg/errors"
 	"github.com/the-gigi/kugo"
+	"io/ioutil"
+	"os"
 )
 
 var _ = Describe("Kind Cluster Tests", Ordered, Serial, func() {
@@ -47,6 +51,44 @@ var _ = Describe("Kind Cluster Tests", Ordered, Serial, func() {
 	It("should take over an existing cluster successfully", func() {
 		cluster, err = New(clusterName, Options{TakeOver: true})
 		Ω(err).Should(BeNil())
+	})
+
+	It("should write kubeconfig to a file successfully", func() {
+		filename := "/tmp/go-k8s-client-test-kubeconfig"
+		// Remove previous file if exists
+		_, err := os.Stat(filename)
+		if err == nil {
+			err = os.Remove(filename)
+			Ω(err).Should(BeNil())
+		} else {
+			Ω(errors.Is(err, os.ErrNotExist)).Should(BeTrue())
+		}
+		cluster, err = New(clusterName, Options{TakeOver: true, KubeConfigFile: filename})
+		Ω(err).Should(BeNil())
+
+		// Verify the file was created
+		_, err = os.Stat(filename)
+		Ω(err).Should(BeNil())
+	})
+
+	It("should fail to ovewrite the default kubeconfig", func() {
+		filename := defaultKubeConfig
+
+		// Verify the default kubeconfig exists
+		_, err := os.Stat(filename)
+		Ω(err).Should(BeNil())
+
+		// Get its content
+		origKubeConfig, err := ioutil.ReadFile(filename)
+		Ω(err).Should(BeNil())
+
+		cluster, err = New(clusterName, Options{TakeOver: true, KubeConfigFile: filename})
+		Ω(err).ShouldNot(BeNil())
+
+		// Verify the original file is still there with the same content
+		kubeConfig, err := ioutil.ReadFile(filename)
+		Ω(err).Should(BeNil())
+		Ω(bytes.Equal(kubeConfig, origKubeConfig)).Should(BeTrue())
 	})
 
 	It("should re-create an existing cluster successfully", func() {
