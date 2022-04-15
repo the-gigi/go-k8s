@@ -1,13 +1,24 @@
 package kind_cluster
 
 import (
+	"fmt"
 	"github.com/pkg/errors"
+	"github.com/the-gigi/kugo"
 	"io/ioutil"
 	"os"
 	"strings"
 )
 
-var defaultKubeConfig = os.ExpandEnv("${HOME}/.kube/config")
+var (
+	defaultKubeConfig = os.ExpandEnv("${HOME}/.kube/config")
+	builtinNamespaces = map[string]bool{
+		"default":            true,
+		"kube-node-lease":    true,
+		"kube-public":        true,
+		"kube-system":        true,
+		"local-path-storage": true,
+	}
+)
 
 type Cluster struct {
 	name string
@@ -47,6 +58,37 @@ func (c *Cluster) Exists() (exists bool, err error) {
 		if cluster == c.name {
 			exists = true
 			return
+		}
+	}
+	return
+}
+
+func (c *Cluster) GetKubeContext() string {
+	return "kind-" + c.name
+}
+
+// Clear - delete all namespaces except the built-in namespaces
+func (c *Cluster) Clear() (err error) {
+	output, err := kugo.Get(kugo.GetRequest{
+		BaseRequest: kugo.BaseRequest{
+			KubeContext: c.GetKubeContext(),
+		},
+		Kind:   "ns",
+		Output: "name",
+	})
+	if err != nil {
+		return
+	}
+
+	output = strings.Replace(output, "namespace/", "", -1)
+	namespaces := strings.Split(output, "\n")
+	for _, ns := range namespaces {
+		if !builtinNamespaces[ns] && ns != "" {
+			cmd := fmt.Sprintf("delete ns %s --context %s", ns, c.GetKubeContext())
+			_, err = kugo.Run(cmd)
+			if err != nil {
+				return
+			}
 		}
 	}
 	return

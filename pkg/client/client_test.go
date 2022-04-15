@@ -11,52 +11,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
-	"strings"
 )
 
 const (
 	clusterName    = "go-k8s-client-test"
-	kubeContext    = "kind-" + clusterName
 	kubeConfigFile = "/tmp/" + clusterName + "-kubeconfig"
 	testImage      = "gcr.io/google_containers/pause"
 )
-
-var (
-	builtinNamespaces = map[string]bool{
-		"default":            true,
-		"kube-node-lease":    true,
-		"kube-public":        true,
-		"kube-system":        true,
-		"local-path-storage": true,
-	}
-)
-
-// Delete all namespaces except the built-in namespaces
-func resetCluster() (err error) {
-	output, err := kugo.Get(kugo.GetRequest{
-		BaseRequest: kugo.BaseRequest{
-			KubeContext: kubeContext,
-		},
-		Kind:   "ns",
-		Output: "name",
-	})
-	if err != nil {
-		return
-	}
-
-	output = strings.Replace(output, "namespace/", "", -1)
-	namespaces := strings.Split(output, "\n")
-	for _, ns := range namespaces {
-		if !builtinNamespaces[ns] && ns != "" {
-			cmd := fmt.Sprintf("delete ns %s --context %s", ns, kubeContext)
-			_, err = kugo.Run(cmd)
-			if err != nil {
-				return
-			}
-		}
-	}
-	return
-}
 
 var _ = Describe("Client Tests", Ordered, func() {
 	var err error
@@ -67,17 +28,17 @@ var _ = Describe("Client Tests", Ordered, func() {
 	var pods []unstructured.Unstructured
 
 	BeforeAll(func() {
-		_, err = kind_cluster.New(clusterName, kind_cluster.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
+		c, err := kind_cluster.New(clusterName, kind_cluster.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
 		Ω(err).Should(BeNil())
 
-		err = resetCluster()
+		err = c.Clear()
 		Ω(err).Should(BeNil())
 
 		// Create namespace ns-1 and deploy 3 replicas of the pausecontainer
-		_, err = kugo.Run("create ns ns-1 --context " + kubeContext)
+		_, err = kugo.Run("create ns ns-1 --context " + c.GetKubeConfig())
 		Ω(err).Should(BeNil())
 
-		cmd := fmt.Sprintf("create deployment test-deployment --image %s --replicas 3 -n ns-1 --context %s", testImage, kubeContext)
+		cmd := fmt.Sprintf("create deployment test-deployment --image %s --replicas 3 -n ns-1 --context %s", testImage, c.GetKubeConfig())
 		_, err = kugo.Run(cmd)
 		Ω(err).Should(BeNil())
 
