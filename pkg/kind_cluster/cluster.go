@@ -21,7 +21,8 @@ var (
 )
 
 type Cluster struct {
-	name string
+	name           string
+	kubeConfigFile string
 }
 
 // Delete - deletes a cluster by name
@@ -71,7 +72,8 @@ func (c *Cluster) GetKubeContext() string {
 func (c *Cluster) Clear() (err error) {
 	output, err := kugo.Get(kugo.GetRequest{
 		BaseRequest: kugo.BaseRequest{
-			KubeContext: c.GetKubeContext(),
+			KubeConfigFile: c.kubeConfigFile,
+			KubeContext:    c.GetKubeContext(),
 		},
 		Kind:   "ns",
 		Output: "name",
@@ -84,9 +86,10 @@ func (c *Cluster) Clear() (err error) {
 	namespaces := strings.Split(output, "\n")
 	for _, ns := range namespaces {
 		if !builtinNamespaces[ns] && ns != "" {
-			cmd := fmt.Sprintf("delete ns %s --context %s", ns, c.GetKubeContext())
-			_, err = kugo.Run(cmd)
+			cmd := fmt.Sprintf("delete ns %s --kubeconfig %s --context %s", ns, c.kubeConfigFile, c.GetKubeContext())
+			output, err = kugo.Run(cmd)
 			if err != nil {
+				err = errors.Wrap(err, output)
 				return
 			}
 		}
@@ -130,7 +133,7 @@ func New(name string, options Options) (cluster *Cluster, err error) {
 		return
 	}
 
-	cluster = &Cluster{name: name}
+	cluster = &Cluster{name: name, kubeConfigFile: options.KubeConfigFile}
 	exists, err := cluster.Exists()
 	if err != nil {
 		return

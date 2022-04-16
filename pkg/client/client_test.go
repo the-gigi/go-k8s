@@ -11,20 +11,23 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
+	"os"
+	"time"
 )
 
 const (
-	clusterName    = "go-k8s-client-test"
-	kubeConfigFile = "/tmp/" + clusterName + "-kubeconfig"
-	testImage      = "gcr.io/google_containers/pause"
+	clusterName = "go-k8s-client-test"
+	testImage   = "gcr.io/google_containers/pause"
 )
+
+var kubeConfigFile = os.TempDir() + clusterName + "-kubeconfig"
 
 var _ = Describe("Client Tests", Ordered, func() {
 	var err error
 	var dynamicClient DynamicClient
 	var clientset kubernetes.Interface
 
-	var podsGVR schema.GroupVersionResource
+	var podsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	var pods []unstructured.Unstructured
 
 	BeforeAll(func() {
@@ -35,16 +38,28 @@ var _ = Describe("Client Tests", Ordered, func() {
 		Ω(err).Should(BeNil())
 
 		// Create namespace ns-1 and deploy 3 replicas of the pausecontainer
-		_, err = kugo.Run("create ns ns-1 --context " + c.GetKubeConfig())
+		cmd := fmt.Sprintf("create ns ns-1 --kubeconfig %s --context %s", kubeConfigFile, c.GetKubeContext())
+		_, err = kugo.Run(cmd)
 		Ω(err).Should(BeNil())
 
-		cmd := fmt.Sprintf("create deployment test-deployment --image %s --replicas 3 -n ns-1 --context %s", testImage, c.GetKubeConfig())
+		cmd = fmt.Sprintf(`create deployment test-deployment 
+                                 --image %s --replicas 3 -n ns-1 
+                                 --kubeconfig %s --context %s`, testImage, kubeConfigFile, c.GetKubeContext())
 		_, err = kugo.Run(cmd)
 		Ω(err).Should(BeNil())
 
 		// wait for deployment to be ready
-		cmd = "wait deployment test-deployment --for condition=Available=True --timeout 60s"
-		_, err = kugo.Run(cmd)
+		cmd = fmt.Sprintf(`wait deployment test-deployment --for condition=Available=True --timeout 60s
+                                   -n ns-1 
+                                   --kubeconfig %s 
+                                   --context %s`, kubeConfigFile, c.GetKubeContext())
+		for i := 0; i < 5; i++ {
+			_, err = kugo.Run(cmd)
+			if err == nil {
+				break
+			}
+			time.Sleep(time.Second)
+		}
 		Ω(err).Should(BeNil())
 	})
 
@@ -56,8 +71,6 @@ var _ = Describe("Client Tests", Ordered, func() {
 		clientset, err = NewClientset(kubeConfigFile)
 		Ω(err).Should(BeNil())
 		Ω(clientset).ShouldNot(BeNil())
-
-		podsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	})
 
 	It("should get pods successfully with the dynamic client", func() {

@@ -3,11 +3,11 @@ module github.com/the-gigi/go-k8s
 go 1.18
 
 require (
+	github.com/google/uuid v1.1.2
 	github.com/onsi/ginkgo/v2 v2.1.3
 	github.com/onsi/gomega v1.19.0
 	github.com/pkg/errors v0.9.1
-	github.com/the-gigi/go-k8s/pkg/kind_cluster v0.0.0-20220414054610-1a6c3eb3508b
-	github.com/the-gigi/kugo v0.0.0-20220414032828-c3d70f7b91c2
+	github.com/the-gigi/kugo v0.0.0-20220416023201-b1dee855710c
 	k8s.io/api v0.23.5
 	k8s.io/apimachinery v0.23.5
 	k8s.io/client-go v0.23.5

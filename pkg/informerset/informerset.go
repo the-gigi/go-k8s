@@ -7,20 +7,40 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
+	"sync"
 	"time"
 )
 
 type informerset struct {
-	Informers   map[schema.GroupVersionResource]*informer
-	StopChannel chan struct{}
+	informers   map[schema.GroupVersionResource]*informer
+	stopChannel chan struct{}
+	waitForSync bool
+	factory     dynamicinformer.DynamicSharedInformerFactory
+	m           sync.Mutex
 }
 
+// Start - start all
+func (is *informerset) Start() {
+	is.m.Lock()
+	defer is.m.Unlock()
+	is.factory.Start(is.stopChannel)
+	if is.waitForSync {
+		// Ignore returned map of synced informers.
+		// It's relevant only if Stop() was called before Start() channel was closed and then all bets are off
+		is.factory.WaitForCacheSync(is.stopChannel)
+	}
+}
+
+// Stop - stops all informers from listening and waiting for sync
 func (is *informerset) Stop() {
-	is.StopChannel <- struct{}{}
+	is.stopChannel <- struct{}{}
 }
 
 func (is *informerset) AddEventHandler(gvr schema.GroupVersionResource, handlers cache.ResourceEventHandlerFuncs) (err error) {
-	in, ok := is.Informers[gvr]
+	is.m.Lock()
+	defer is.m.Unlock()
+
+	in, ok := is.informers[gvr]
 	if !ok {
 		err = errors.Errorf("informerset doesn't support GVR: '%v'", gvr)
 		return
@@ -46,18 +66,20 @@ func NewInformerset(o Options) (ins Informerset, err error) {
 
 	informerMap := map[schema.GroupVersionResource]*informer{}
 	factory := f(o.Client, o.DefaultResync, o.Namespace, nil)
+	var in *informer
 	for _, gvr := range o.Gvrs {
-		in, err := newInformer(factory.ForResource(gvr))
+		in, err = newInformer(factory.ForResource(gvr))
 		if err != nil {
 			return
 		}
 		informerMap[gvr] = in
 	}
 
-	var stopCh chan struct{}
-	factory.Start(stopCh)
-	factory.WaitForCacheSync(stopCh)
-
-	ins = &informerset{Informers: informerMap}
+	ins = &informerset{
+		informers:   informerMap,
+		stopChannel: make(chan struct{}),
+		waitForSync: o.WaitForSync,
+		factory:     factory,
+	}
 	return
 }

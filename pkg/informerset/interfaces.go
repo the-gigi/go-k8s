@@ -6,6 +6,7 @@ import (
 )
 
 type Informerset interface {
+	Start()
 	Stop()
 	AddEventHandler(gvr schema.GroupVersionResource, handlers cache.ResourceEventHandlerFuncs) error
 }

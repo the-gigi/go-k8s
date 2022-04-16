@@ -1,104 +1,139 @@
 package informerset
 
 import (
-	"context"
 	"fmt"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/the-gigi/go-k8s/pkg/client"
 	"github.com/the-gigi/go-k8s/pkg/kind_cluster"
 	"github.com/the-gigi/kugo"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/cache"
 	"strings"
+	"time"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"os"
 )
 
-// Delete all namespaces except the built-in namespaces
-func resetCluster() (err error) {
-	output, err := kugo.Get(kugo.GetRequest{
-		BaseRequest: kugo.BaseRequest{
-			KubeContext: kubeContext,
-		},
-		Kind:   "ns",
-		Output: "name",
-	})
-	if err != nil {
-		return
-	}
+const (
+	clusterName = "go-k8s-client-test"
+	testImage   = "gcr.io/google_containers/pause"
+)
 
-	output = strings.Replace(output, "namespace/", "", -1)
-	namespaces := strings.Split(output, "\n")
-	for _, ns := range namespaces {
-		if !builtinNamespaces[ns] && ns != "" {
-			cmd := fmt.Sprintf("delete ns %s --context %s", ns, kubeContext)
-			_, err = kugo.Run(cmd)
-			if err != nil {
-				return
-			}
+var kubeConfigFile = os.TempDir() + clusterName + "-kubeconfig"
+
+// createDeployment deploy 3 replicas of the pause container and waits for deployment to be ready
+func createDeployment(kubeContext string) {
+	cmd := fmt.Sprintf("create deployment test-deployment --image %s --replicas 3 -n ns-1 --context %s", testImage, kubeContext)
+	_, err := kugo.Run(cmd)
+	Ω(err).Should(BeNil())
+
+	// wait for the deployment to exist (otherwise the subsequent wait command might fail)
+	cmd = "get deployment test-deployment -n ns-1 --context " + kubeContext
+	var done = make(chan struct{})
+	var output string
+	wait.Until(func() {
+		output, err = kugo.Run(cmd)
+		if err != nil || strings.Contains(output, "not found") {
+			return
 		}
-	}
-	return
+		close(done)
+	}, time.Second, done)
+	// wait for deployment to be ready
+	cmd = "wait deployment test-deployment --for condition=Available=True --timeout 60s -n ns-1 --context " + kubeContext
+	_, err = kugo.Run(cmd)
+	Ω(err).Should(BeNil())
 }
 
-var _ = Describe("Client Tests", Ordered, func() {
+var _ = Describe("Informer Tests", Ordered, func() {
 	var err error
-	var dynamicClient DynamicClient
-	var clientset kubernetes.Interface
 
-	var podsGVR schema.GroupVersionResource
-	var pods []unstructured.Unstructured
+	var podsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	var deploymentsGVR = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	var dynamicClient dynamic.Interface
+	var ins Informerset
+	var cluster *kind_cluster.Cluster
+	var options Options
 
 	BeforeAll(func() {
-		_, err = kind_cluster.New(clusterName, kind_cluster.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
+		cluster, err = kind_cluster.New(clusterName, kind_cluster.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
 		Ω(err).Should(BeNil())
 
-		err = resetCluster()
+		dynamicClient, err = client.NewDynamicClient(kubeConfigFile)
 		Ω(err).Should(BeNil())
 
-		// Create namespace ns-1 and deploy 3 replicas of the pausecontainer
-		_, err = kugo.Run("create ns ns-1 --context " + kubeContext)
-		Ω(err).Should(BeNil())
-
-		cmd := fmt.Sprintf("create deployment test-deployment --image %s --replicas 3 -n ns-1 --context %s", testImage, kubeContext)
-		_, err = kugo.Run(cmd)
-		Ω(err).Should(BeNil())
-
-		// wait for deployment to be ready
-		cmd = "wait deployment test-deployment --for condition=Available=True --timeout 60s"
-		_, err = kugo.Run(cmd)
-		Ω(err).Should(BeNil())
+		gvrs := []schema.GroupVersionResource{
+			podsGVR,
+			deploymentsGVR,
+		}
+		options = Options{
+			Gvrs:   gvrs,
+			Client: dynamicClient,
+		}
 	})
 
 	BeforeEach(func() {
-		dynamicClient, err = NewDynamicClient(kubeConfigFile)
+		err = cluster.Clear()
 		Ω(err).Should(BeNil())
-		Ω(dynamicClient).ShouldNot(BeNil())
 
-		clientset, err = NewClientset(kubeConfigFile)
+		// Create namespace ns-1
+		_, err = kugo.Run("create ns ns-1 --context " + cluster.GetKubeContext())
 		Ω(err).Should(BeNil())
-		Ω(clientset).ShouldNot(BeNil())
 
-		podsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+		ins, err = NewInformerset(options)
+		Ω(err).Should(BeNil())
 	})
 
-	It("should get pods successfully with the dynamic client", func() {
-		podList, err := dynamicClient.Resource(podsGVR).Namespace("ns-1").List(context.Background(), metav1.ListOptions{})
-		Ω(err).Should(BeNil())
+	It("should successfully watch for ns-1 pods and deployments", func() {
+		pods := []string{}
+		deployments := []string{}
+		go func() {
+			ins.AddEventHandler(podsGVR, cache.ResourceEventHandlerFuncs{
+				AddFunc: func(obj interface{}) {
+					u := obj.(*unstructured.Unstructured)
+					if u.GetNamespace() != "ns-1" {
+						return
+					}
+					pods = append(pods, u.GetName())
+				},
+			})
 
-		pods = podList.Items
-		Ω(pods).ShouldNot(BeNil())
+			ins.AddEventHandler(deploymentsGVR, cache.ResourceEventHandlerFuncs{
+				AddFunc: func(obj interface{}) {
+					u := obj.(*unstructured.Unstructured)
+					if u.GetNamespace() != "ns-1" {
+						return
+					}
+					deployments = append(deployments, u.GetName())
+				},
+			})
+		}()
+
+		// Start listening
+		ins.Start()
+
+		// Create a deployment with 3 pods, which will generate events
+		createDeployment(cluster.GetKubeContext())
+
+		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
+		for i := 0; i < 5; i++ {
+			if len(pods) == 3 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		Ω(deployments).Should(HaveLen(1))
+		Ω(deployments[0]).Should(Equal("test-deployment"))
 		Ω(pods).Should(HaveLen(3))
-	})
+		for _, pod := range pods {
+			Ω(pod).Should(MatchRegexp("test-deployment-.*"))
+		}
 
-	It("should get pods successfully with the clientset", func() {
-		podList, err := clientset.CoreV1().Pods("ns-1").List(context.Background(), metav1.ListOptions{})
-		Ω(err).Should(BeNil())
-
-		pods := podList.Items
-		Ω(pods).ShouldNot(BeNil())
-		Ω(pods).Should(HaveLen(3))
-
-		Ω(pods[0].Spec.Containers[0].Image).Should(Equal(testImage))
+		// Stop the informer
+		ins.Stop()
 	})
 })
