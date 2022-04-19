@@ -68,6 +68,10 @@ func (c *Cluster) GetKubeContext() string {
 	return "kind-" + c.name
 }
 
+func (c *Cluster) GetKubeConfig() string {
+	return c.kubeConfigFile
+}
+
 // Clear - delete all namespaces except the built-in namespaces
 func (c *Cluster) Clear() (err error) {
 	output, err := kugo.Get(kugo.GetRequest{
