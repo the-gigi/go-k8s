@@ -9,6 +9,7 @@ import (
 	"github.com/the-gigi/kugo"
 	"io/ioutil"
 	"os"
+	"path"
 )
 
 var _ = Describe("Kind Cluster Tests", Ordered, Serial, func() {
@@ -54,7 +55,7 @@ var _ = Describe("Kind Cluster Tests", Ordered, Serial, func() {
 	})
 
 	It("should write kubeconfig to a file successfully", func() {
-		filename := "/tmp/go-k8s-client-test-kubeconfig"
+		filename :=  path.Join(os.TempDir(), "go-k8s-client-test-kubeconfig")
 		// Remove previous file if exists
 		_, err := os.Stat(filename)
 		if err == nil {
