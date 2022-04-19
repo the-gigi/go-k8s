@@ -1,4 +1,4 @@
-package kind_cluster
+package kind
 
 import (
 	"bytes"

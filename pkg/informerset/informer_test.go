@@ -5,7 +5,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/the-gigi/go-k8s/pkg/client"
-	"github.com/the-gigi/go-k8s/pkg/kind_cluster"
+	"github.com/the-gigi/go-k8s/pkg/kind"
 	"github.com/the-gigi/kugo"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -55,11 +55,11 @@ var _ = Describe("Informer Tests", Ordered, func() {
 	var deploymentsGVR = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
 	var dynamicClient dynamic.Interface
 	var ins Informerset
-	var cluster *kind_cluster.Cluster
+	var cluster *kind.Cluster
 	var options Options
 
 	BeforeAll(func() {
-		cluster, err = kind_cluster.New(clusterName, kind_cluster.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
+		cluster, err = kind.New(clusterName, kind.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
 		Ω(err).Should(BeNil())
 
 		dynamicClient, err = client.NewDynamicClient(kubeConfigFile)

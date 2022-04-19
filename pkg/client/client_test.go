@@ -5,7 +5,7 @@ import (
 	"fmt"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/the-gigi/go-k8s/pkg/kind_cluster"
+	"github.com/the-gigi/go-k8s/pkg/kind"
 	"github.com/the-gigi/kugo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -32,7 +32,7 @@ var _ = Describe("Client Tests", Ordered, func() {
 	var pods []unstructured.Unstructured
 
 	BeforeAll(func() {
-		c, err := kind_cluster.New(clusterName, kind_cluster.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
+		c, err := kind.New(clusterName, kind.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
 		Ω(err).Should(BeNil())
 
 		err = c.Clear()
