@@ -3,7 +3,11 @@ package multi_cluster_lock
 import (
 	"context"
 	"encoding/json"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	"math/rand"
+	"time"
 )
 
 type gistLock struct {
@@ -25,6 +29,17 @@ func gistToLeaderElectionRecord(gist []byte) (record *resourcelock.LeaderElectio
 
 // Get returns the LeaderElectionRecord
 func (gl *gistLock) Get(ctx context.Context) (record *resourcelock.LeaderElectionRecord, recordBytes []byte, err error) {
+	defer func() {
+		// Convert any error to NotFound, which is what the leader election can work with
+		if err != nil {
+			qualifiedResource := schema.GroupResource{
+				Group:    "coordination.k8s.io",
+				Resource: "Lease",
+			}
+			err = errors.NewNotFound(qualifiedResource, gl.gistId)
+			return
+		}
+	}()
 	gist, err := gl.cli.Get(gl.gistId)
 	if err != nil {
 		return
@@ -39,6 +54,10 @@ func (gl *gistLock) Get(ctx context.Context) (record *resourcelock.LeaderElectio
 	if err != nil {
 		return
 	}
+
+	// add a little random delay of up to 100 milliseconds seconds to prevent race conditions
+	delay := time.Duration(100 * rand.Float64())
+	time.Sleep(delay * time.Millisecond)
 	return
 }
 
@@ -75,6 +94,7 @@ func (gl *gistLock) Describe() string {
 }
 
 func NewGistLock(identity string, gistId string, accessToken string) (lock resourcelock.Interface, err error) {
+	rand.Seed(time.Now().UnixNano())
 	cli := NewGistClient(accessToken)
 	_, err = cli.Get(gistId)
 	if err != nil {
