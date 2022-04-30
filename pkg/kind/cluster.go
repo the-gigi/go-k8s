@@ -3,6 +3,7 @@ package kind
 import (
 	"fmt"
 	"github.com/pkg/errors"
+	"github.com/the-gigi/go-k8s/pkg/client"
 	"github.com/the-gigi/kugo"
 	"io/ioutil"
 	"os"
@@ -101,6 +102,19 @@ func (c *Cluster) Clear() (err error) {
 	return
 }
 
+// GetDynamicClient - return a DynamicClient to interact with the cluster
+//
+// It returns an error if the cluster uses the default kube config
+func (c *Cluster) GetDynamicClient() (cli client.DynamicClient, err error) {
+	kubeConfig := c.GetKubeConfig()
+	if kubeConfig == "" {
+		err = errors.New("can't get dynamic client without a dedicated kube config file")
+	}
+
+	cli, err = client.NewDynamicClient(kubeConfig)
+	return
+}
+
 // Options determines what to do if a cluster with the same name already exists
 //
 // At most one of `TakeOver` and `Recreate` can be true
@@ -169,7 +183,11 @@ func New(name string, options Options) (cluster *Cluster, err error) {
 
 	// Create a new cluster if no cluster with the same name exists and return
 	if !exists {
-		output, err = run("create", "cluster", "--name", name)
+		args := []string{"create", "cluster", "--name", name}
+		if options.KubeConfigFile != "" {
+			args = append(args, "--kubeconfig", options.KubeConfigFile)
+		}
+		output, err = run(args...)
 		if err != nil {
 			err = errors.Wrap(err, output)
 		}
