@@ -10,22 +10,24 @@ const (
 	kindVersion = "v0.12.0"
 )
 
-func isKindInstalled() (installed bool, err error) {
-	bytes, err := exec.Command("which", "kind").CombinedOutput()
-	if err != nil {
-		return
-	}
-	output := string(bytes)
-	installed = !strings.Contains(output, "not found")
+func isKindInstalled() (installed bool) {
+	return isToolInPath("kind")
+}
+
+func isDockerInstalled() (installed bool) {
+	return isToolInPath("docker")
+}
+
+// isToolInPath checks if a tool is on the path
+func isToolInPath(tool string) (inPath bool) {
+	// Assume "which" will not fail ¯\_(ツ)_/¯
+	bytes, _ := exec.Command("which", tool).CombinedOutput()
+	inPath = !strings.Contains(string(bytes), "not found")
 	return
 }
 
-// installKind installed kind using Go
+// installKind installs kind via Go if it isn't installed already (you may prefer homebrew)
 func installKind() (err error) {
-	installed, err := isKindInstalled()
-	if err != nil || installed {
-		return
-	}
 	kindModule := "sigs.k8s.io/kind@" + kindVersion
 	err = exec.Command("go", "install", kindModule).Wait()
 	return
@@ -59,4 +61,23 @@ func getClusters() (clusters []string, err error) {
 		}
 	}
 	return
+}
+
+// init checks if docker and kind are installed
+//
+// If docker is not installed it panics.
+// If kind is not installed it tries to install, and if that fails it panics
+func init() {
+	if !isDockerInstalled() {
+		panic("docker is not installed")
+	}
+
+	if isKindInstalled() {
+		return
+	}
+
+	err := installKind()
+	if err != nil {
+		panic(errors.Wrap(err, "failed to install kind"))
+	}
 }
