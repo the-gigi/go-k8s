@@ -21,7 +21,7 @@ const (
 	testImage   = "gcr.io/google_containers/pause"
 )
 
-var kubeConfigFile = path.Join(os.TempDir(), clusterName + "-kubeconfig")
+var kubeConfigFile = path.Join(os.TempDir(), clusterName+"-kubeconfig")
 
 var _ = Describe("Client Tests", Ordered, func() {
 	var err error
