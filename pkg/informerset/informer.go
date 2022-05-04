@@ -17,12 +17,12 @@ func (in *informer) AddEventHandler(handler cache.ResourceEventHandler) {
 	in.sharedIndexInformer.AddEventHandler(handler)
 }
 
-func (in *informer) List(selector labels.Selector, namespace string) (ret []runtime.Object, err error) {
+func (in *informer) List(selector labels.Selector, namespace string) (objects []runtime.Object, err error) {
 	if namespace == "" {
-		ret, err = in.lister.List(selector)
+		objects, err = in.lister.List(selector)
 		return
 	}
-	ret, err = in.lister.ByNamespace(namespace).List(selector)
+	objects, err = in.lister.ByNamespace(namespace).List(selector)
 	return
 }
 

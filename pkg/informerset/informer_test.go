@@ -8,6 +8,8 @@ import (
 	"github.com/the-gigi/go-k8s/pkg/kind"
 	"github.com/the-gigi/kugo"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"strings"
@@ -20,19 +22,19 @@ import (
 
 const (
 	clusterName = "go-k8s-client-test"
-	testImage   = "gcr.io/google_containers/pause"
+	testImage   = "k8s.gcr.io/pause:3.1"
 )
 
 var kubeConfigFile = os.TempDir() + clusterName + "-kubeconfig"
 
 // createDeployment deploy 3 replicas of the pause container and waits for deployment to be ready
-func createDeployment(kubeContext string) {
-	cmd := fmt.Sprintf("create deployment test-deployment --image %s --replicas 3 -n ns-1 --context %s", testImage, kubeContext)
+func createDeployment() {
+	cmd := fmt.Sprintf("create deployment test-deployment --image %s --replicas 3 -n ns-1 --kubeconfig %s", testImage, kubeConfigFile)
 	_, err := kugo.Run(cmd)
 	Ω(err).Should(BeNil())
 
 	// wait for the deployment to exist (otherwise the subsequent wait command might fail)
-	cmd = "get deployment test-deployment -n ns-1 --context " + kubeContext
+	cmd = "get deployment test-deployment -n ns-1 --kubeconfig " + kubeConfigFile
 	var done = make(chan struct{})
 	var output string
 	wait.Until(func() {
@@ -43,7 +45,7 @@ func createDeployment(kubeContext string) {
 		close(done)
 	}, time.Second, done)
 	// wait for deployment to be ready
-	cmd = "wait deployment test-deployment --for condition=Available=True --timeout 60s -n ns-1 --context " + kubeContext
+	cmd = "wait deployment test-deployment --for condition=Available=True --timeout 60s -n ns-1 --kubeconfig " + kubeConfigFile
 	_, err = kugo.Run(cmd)
 	Ω(err).Should(BeNil())
 }
@@ -80,7 +82,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		Ω(err).Should(BeNil())
 
 		// Create namespace ns-1
-		_, err = kugo.Run("create ns ns-1 --context " + cluster.GetKubeContext())
+		_, err = kugo.Run("create ns ns-1 --kubeconfig " + cluster.GetKubeConfig())
 		Ω(err).Should(BeNil())
 
 		ins, err = NewInformerset(options)
@@ -91,7 +93,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		pods := []string{}
 		deployments := []string{}
 		go func() {
-			ins.AddEventHandler(podsGVR, cache.ResourceEventHandlerFuncs{
+			err = ins.AddEventHandler(podsGVR, cache.ResourceEventHandlerFuncs{
 				AddFunc: func(obj interface{}) {
 					u := obj.(*unstructured.Unstructured)
 					if u.GetNamespace() != "ns-1" {
@@ -100,8 +102,8 @@ var _ = Describe("Informer Tests", Ordered, func() {
 					pods = append(pods, u.GetName())
 				},
 			})
-
-			ins.AddEventHandler(deploymentsGVR, cache.ResourceEventHandlerFuncs{
+			Ω(err).Should(BeNil())
+			err = ins.AddEventHandler(deploymentsGVR, cache.ResourceEventHandlerFuncs{
 				AddFunc: func(obj interface{}) {
 					u := obj.(*unstructured.Unstructured)
 					if u.GetNamespace() != "ns-1" {
@@ -110,13 +112,14 @@ var _ = Describe("Informer Tests", Ordered, func() {
 					deployments = append(deployments, u.GetName())
 				},
 			})
+			Ω(err).Should(BeNil())
 		}()
 
 		// Start listening
 		ins.Start()
 
 		// Create a deployment with 3 pods, which will generate events
-		createDeployment(cluster.GetKubeContext())
+		createDeployment()
 
 		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
 		for i := 0; i < 5; i++ {
@@ -131,6 +134,50 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		Ω(pods).Should(HaveLen(3))
 		for _, pod := range pods {
 			Ω(pod).Should(MatchRegexp("test-deployment-.*"))
+		}
+
+		// Stop the informer
+		ins.Stop()
+	})
+
+	It("should successfully list ns-1 pods and deployments", func() {
+		pods := []runtime.Object{}
+		deployments := []runtime.Object{}
+
+		// Start listening
+		ins.Start()
+
+		// Create a deployment with 3 pods, which will generate events
+		createDeployment()
+
+		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
+		selector := labels.NewSelector()
+		ok := false
+		var objectMap map[schema.GroupVersionResource][]runtime.Object
+		for i := 0; i < 5; i++ {
+			objectMap, err = ins.List(selector, "ns-1")
+			Ω(err).Should(BeNil())
+			pods, ok = objectMap[podsGVR]
+			if ok && len(pods) == 3 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		deployments = objectMap[deploymentsGVR]
+		Ω(deployments).Should(HaveLen(1))
+		deployment, err := runtime.DefaultUnstructuredConverter.ToUnstructured(deployments[0])
+		Ω(err).Should(BeNil())
+		metadata := deployment["metadata"].(map[string]interface{})
+		name := metadata["name"].(string)
+		Ω(name).Should(Equal("test-deployment"))
+		Ω(pods).Should(HaveLen(3))
+		for i := range pods {
+			pod, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pods[i])
+			Ω(err).Should(BeNil())
+			metadata := pod["metadata"].(map[string]interface{})
+			name = metadata["name"].(string)
+			Ω(name).Should(MatchRegexp("test-deployment-.*"))
 		}
 
 		// Stop the informer
