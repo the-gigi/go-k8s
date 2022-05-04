@@ -3,6 +3,8 @@ package informerset
 import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -46,6 +48,19 @@ func (is *informerset) AddEventHandler(gvr schema.GroupVersionResource, handlers
 		return
 	}
 	in.AddEventHandler(handlers)
+	return
+}
+
+func (is *informerset) List(selector labels.Selector, namespace string) (objects map[schema.GroupVersionResource][]runtime.Object, err error) {
+	objects = map[schema.GroupVersionResource][]runtime.Object{}
+	var list []runtime.Object
+	for gvr, inf := range is.informers {
+		list, err = inf.List(selector, namespace)
+		if err != nil {
+			return
+		}
+		objects[gvr] = list
+	}
 	return
 }
 
