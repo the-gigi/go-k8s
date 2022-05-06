@@ -3,7 +3,10 @@ package multi_cluster_lock
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	pkgerrors "github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"math/rand"
@@ -66,14 +69,57 @@ func (gl *gistLock) Create(ctx context.Context, ler resourcelock.LeaderElectionR
 	return gl.Update(ctx, ler)
 }
 
-// Update will update and existing LeaderElectionRecord
+// Update will update an existing LeaderElectionRecord if not held by another actor
 func (gl *gistLock) Update(ctx context.Context, ler resourcelock.LeaderElectionRecord) (err error) {
+	oldLer, _, err := gl.Get(ctx)
+	if err != nil {
+		return
+	}
+
+	// If lock is held by another actor and has not expired yet return an error
+	if oldLer.HolderIdentity != ler.HolderIdentity {
+		now := time.Now()
+		leaseDuration := time.Duration(oldLer.LeaseDurationSeconds) * time.Second
+		validUntil := oldLer.RenewTime.Add(leaseDuration)
+		leaseStillValid := validUntil.After(now)
+		if leaseStillValid {
+			qualifiedResource := schema.GroupResource{
+				Group:    "coordination.k8s.io",
+				Resource: "Lease",
+			}
+			err = errors.NewConflict(qualifiedResource, gl.gistId, pkgerrors.New("lease is still valid"))
+			return
+		}
+
+		fmt.Println("gist_lock.Update()")
+		fmt.Println("current leader:", oldLer.HolderIdentity)
+		fmt.Println("now: %v", now)
+		fmt.Println("valid until:", validUntil)
+		fmt.Println("valid:", leaseStillValid)
+	}
+
+	// Update lock
 	recordBytes, err := json.Marshal(ler)
 	if err != nil {
 		return
 	}
 
 	err = gl.cli.Update(gl.gistId, string(recordBytes))
+	if err != nil {
+		return
+	}
+
+	// If lock was held by another leader ,wait for one more renew period and update again
+	if len(oldLer.HolderIdentity) == 0 && oldLer.HolderIdentity != ler.HolderIdentity {
+		leaseDuration := time.Duration(ler.LeaseDurationSeconds) * time.Second
+		time.Sleep(leaseDuration)
+
+		// Update renew time
+		ler.RenewTime = metav1.Time{time.Now()}
+
+		err = gl.Update(ctx, ler)
+	}
+
 	return
 }
 
