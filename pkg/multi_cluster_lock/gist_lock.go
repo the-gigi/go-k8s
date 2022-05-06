@@ -3,7 +3,6 @@ package multi_cluster_lock
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	pkgerrors "github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,12 +89,6 @@ func (gl *gistLock) Update(ctx context.Context, ler resourcelock.LeaderElectionR
 			err = errors.NewConflict(qualifiedResource, gl.gistId, pkgerrors.New("lease is still valid"))
 			return
 		}
-
-		fmt.Println("gist_lock.Update()")
-		fmt.Println("current leader:", oldLer.HolderIdentity)
-		fmt.Println("now: %v", now)
-		fmt.Println("valid until:", validUntil)
-		fmt.Println("valid:", leaseStillValid)
 	}
 
 	// Update lock
@@ -109,14 +102,34 @@ func (gl *gistLock) Update(ctx context.Context, ler resourcelock.LeaderElectionR
 		return
 	}
 
-	// If lock was held by another leader ,wait for one more renew period and update again
-	if len(oldLer.HolderIdentity) == 0 && oldLer.HolderIdentity != ler.HolderIdentity {
+	// If the lock was held by another leader ,wait for half of the renew period
+	// and check if the leader has changed or not.
+	// If the leader has changed then let them be the leader by returning an eror
+	// However, if we are still the leader then update again to refresh the lease
+	var curLer *resourcelock.LeaderElectionRecord
+	if len(oldLer.HolderIdentity) == 0 || oldLer.HolderIdentity != ler.HolderIdentity {
 		leaseDuration := time.Duration(ler.LeaseDurationSeconds) * time.Second
-		time.Sleep(leaseDuration)
+		time.Sleep(leaseDuration - time.Second)
+		// Check current holder
+		curLer, _, err = gl.Get(ctx)
+		if err != nil {
+			return
+		}
+
+		if curLer.HolderIdentity != ler.HolderIdentity {
+			qualifiedResource := schema.GroupResource{
+				Group:    "coordination.k8s.io",
+				Resource: "Lease",
+			}
+			err = errors.NewConflict(qualifiedResource, gl.gistId, pkgerrors.New("there is a new leader"))
+			return
+		}
 
 		// Update renew time
 		ler.RenewTime = metav1.Time{time.Now()}
 
+		// Update LER again
+		ler.RenewTime = metav1.Time{time.Now()}
 		err = gl.Update(ctx, ler)
 	}
 
