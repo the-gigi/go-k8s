@@ -37,9 +37,9 @@ type Interface interface {
 
 # Reference
 
-https://github.com/kubernetes/client-go/tree/master/tools/leader-election
-https://github.com/kubernetes/client-go/tree/master/examples/leader-election
-https://itnext.io/leader-election-in-kubernetes-using-client-go-a19cbe7a9a85
+- https://github.com/kubernetes/client-go/tree/master/tools/leader-election
+- https://github.com/kubernetes/client-go/tree/master/examples/leader-election
+- https://itnext.io/leader-election-in-kubernetes-using-client-go-a19cbe7a9a85
 
 
 
