@@ -3,11 +3,8 @@ package kind
 import (
 	"bytes"
 	"github.com/google/uuid"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	"github.com/the-gigi/kugo"
-	"io/ioutil"
 	"os"
 	"path"
 )
@@ -55,7 +52,7 @@ var _ = Describe("Kind Cluster Tests", Ordered, Serial, func() {
 	})
 
 	It("should write kubeconfig to a file successfully", func() {
-		filename :=  path.Join(os.TempDir(), "go-k8s-client-test-kubeconfig")
+		filename := path.Join(os.TempDir(), "go-k8s-client-test-kubeconfig")
 		// Remove previous file if exists
 		_, err := os.Stat(filename)
 		if err == nil {
@@ -80,14 +77,14 @@ var _ = Describe("Kind Cluster Tests", Ordered, Serial, func() {
 		Ω(err).Should(BeNil())
 
 		// Get its content
-		origKubeConfig, err := ioutil.ReadFile(filename)
+		origKubeConfig, err := os.ReadFile(filename)
 		Ω(err).Should(BeNil())
 
 		cluster, err = New(clusterName, Options{TakeOver: true, KubeConfigFile: filename})
 		Ω(err).ShouldNot(BeNil())
 
 		// Verify the original file is still there with the same content
-		kubeConfig, err := ioutil.ReadFile(filename)
+		kubeConfig, err := os.ReadFile(filename)
 		Ω(err).Should(BeNil())
 		Ω(bytes.Equal(kubeConfig, origKubeConfig)).Should(BeTrue())
 	})
