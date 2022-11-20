@@ -1,21 +1,18 @@
 package client
 
 import (
-    "context"
-    "fmt"
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/suite"
-    "os"
-    "path"
-    "testing"
-    //"time"
-    //"context"
-    "github.com/the-gigi/go-k8s/pkg/kind"
-    "github.com/the-gigi/kugo"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-    "k8s.io/apimachinery/pkg/runtime/schema"
-    "k8s.io/client-go/kubernetes"
+	"context"
+	"fmt"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
+	"os"
+	"path"
+	"testing"
+	"github.com/the-gigi/go-k8s/pkg/kind"
+	"github.com/the-gigi/kugo"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
@@ -28,10 +25,10 @@ var kubeConfigFile = path.Join(os.TempDir(), clusterName+"-kubeconfig")
 type ClientTestSuite struct {
     suite.Suite
 
-    dynamicClient DynamicClient
-    clientset     kubernetes.Interface
-    podsGVR       schema.GroupVersionResource
-    pods          []unstructured.Unstructured
+    //dynamicClient DynamicClient
+    //clientset     kubernetes.Interface
+    podsGVR schema.GroupVersionResource
+    pods    []unstructured.Unstructured
 }
 
 // assert operator similar to Gomega'a Ω
@@ -65,19 +62,12 @@ func (s *ClientTestSuite) SetupSuite() {
     å.Nil(err)
 }
 
-func (s *ClientTestSuite) SetupTest() {
-    var err error
-    s.dynamicClient, err = NewDynamicClient(kubeConfigFile)
-    å.Nil(err)
-    å.NotNil(s.dynamicClient)
-
-    s.clientset, err = NewClientset(kubeConfigFile)
-    å.Nil(err)
-    å.NotNil(s.clientset)
-}
-
 func (s *ClientTestSuite) TestGetPodsWithDynamicClient() {
-    podList, err := s.dynamicClient.Resource(s.podsGVR).Namespace("ns-1").List(context.Background(), metav1.ListOptions{})
+    dynamicClient, err := NewDynamicClient(kubeConfigFile)
+    å.Nil(err)
+    å.NotNil(dynamicClient)
+
+    podList, err := dynamicClient.Resource(s.podsGVR).Namespace("ns-1").List(context.Background(), metav1.ListOptions{})
     å.Nil(err)
     å.NotNil(podList)
 
@@ -87,7 +77,11 @@ func (s *ClientTestSuite) TestGetPodsWithDynamicClient() {
 }
 
 func (s *ClientTestSuite) TestGetPodsWithClientset() {
-    podList, err := s.clientset.CoreV1().Pods("ns-1").List(context.Background(), metav1.ListOptions{})
+    clientset, err := NewClientset(kubeConfigFile)
+    å.Nil(err)
+    å.NotNil(clientset)
+
+    podList, err := clientset.CoreV1().Pods("ns-1").List(context.Background(), metav1.ListOptions{})
     å.Nil(err)
     å.NotNil(podList)
 
