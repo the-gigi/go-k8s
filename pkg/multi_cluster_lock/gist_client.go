@@ -1,67 +1,133 @@
 package multi_cluster_lock
 
 import (
-	"context"
-	"github.com/google/go-github/v43/github"
-	"golang.org/x/oauth2"
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+)
+
+const (
+	baseURL = "https://api.github.com/gists/"
 )
 
 type GistClient struct {
-	client *github.Client
+	cli         *http.Client
+	accessToken string
+
+	// client *github.Client
 }
 
-func (gg *GistClient) Get(id string) (data string, err error) {
-	ctx := context.Background()
-	gist, _, err := gg.client.Gists.Get(ctx, id)
+func (gc *GistClient) get(id string) (obj map[string]interface{}, err error) {
+	url := baseURL + id
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return
 	}
 
-	var file *github.GistFile
-	for _, v := range gist.GetFiles() {
-		file = &v
-		break
-	}
+	req.Header.Add("Accept", "application/vnd.github+json")
+	req.Header.Add("Authorization", "Bearer "+gc.accessToken)
+	req.Header.Add("Accept", `application/json`)
 
-	data = file.GetContent()
-	return
-}
-
-func (gg *GistClient) Update(id string, data string) (err error) {
-	ctx := context.Background()
-	gist, _, err := gg.client.Gists.Get(ctx, id)
+	resp, err := gc.cli.Do(req)
 	if err != nil {
 		return
 	}
 
-	// Get the first file
-	var filename github.GistFilename
-	var file github.GistFile
-	for k, f := range gist.GetFiles() {
-		filename = k
-		file = f
-		break
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
 	}
 
-	// Update the file context
-	file.Content = &data
-
-	// Push the modified file back into the gist
-	gist.Files[filename] = file
-
-	// Write the edited gist back
-	_, _, err = gg.client.Gists.Edit(ctx, id, gist)
+	err = json.Unmarshal(body, &obj)
+	if err != nil {
+		return
+	}
 	return
 }
 
-func NewGistClient(accessToken string) (gg *GistClient) {
-	ctx := context.Background()
-	sts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: accessToken},
-	)
-	tc := oauth2.NewClient(ctx, sts)
-	gg = &GistClient{
-		client: github.NewClient(tc),
+func (gc *GistClient) update(id string, obj map[string]interface{}) (err error) {
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return
+	}
+
+	url := baseURL + id
+	body := bytes.NewReader(data)
+	req, err := http.NewRequest("PATCH", url, body)
+	if err != nil {
+		return
+	}
+
+	req.Header.Add("Accept", "application/vnd.github+json")
+	req.Header.Add("Authorization", "Bearer "+gc.accessToken)
+	_, err = gc.cli.Do(req)
+	return
+}
+
+func (gc *GistClient) Get(id string) (data string, err error) {
+	//	curl \
+	//	-H "Accept: application/vnd.github+json" \
+	//	-H "Authorization: Bearer <YOUR-TOKEN>" \
+	//https://api.github.com/gists/GIST_ID
+
+	obj, err := gc.get(id)
+	if err != nil {
+		return
+	}
+
+	fileMap := obj["files"].(map[string]interface{})
+	// get content of the first file
+	for _, file := range fileMap {
+		rawData := file.(map[string]interface{})["content"]
+		data = rawData.(string)
+		break
+	}
+
+	return
+}
+
+func (gc *GistClient) Update(id string, data string) (err error) {
+	//	curl \
+	//	-X PATCH \
+	//	-H "Accept: application/vnd.github+json" \
+	//	-H "Authorization: Bearer <YOUR-TOKEN>" \
+	//https://api.github.com/gists/GIST_ID \
+	//	-d '{"description":"An updated gist description","files":{"README.md":{"content":"Hello World from GitHub"}}}'
+
+	gist, err := gc.get(id)
+	if err != nil {
+		return
+	}
+
+	fileMap := gist["files"].(map[string]interface{})
+	// get content of the first file
+	for _, file := range fileMap {
+		file.(map[string]interface{})["content"] = data
+		break
+	}
+
+	err = gc.update(id, gist)
+	return
+}
+
+func NewGistClient(accessToken string) (gc *GistClient) {
+	//ctx := context.Background()
+	//sts := oauth2.StaticTokenSource(
+	//	&oauth2.Token{AccessToken: accessToken},
+	//)
+	//tc := oauth2.NewClient(ctx, sts)
+	//gc = &GistClient{
+	//	client: github.NewClient(tc),
+	//}
+
+	// Clean up access token from inadvertent newlines
+	accessToken = strings.Replace(accessToken, "\n", "", -1)
+	gc = &GistClient{
+		accessToken: accessToken,
+		cli:         &http.Client{},
 	}
 	return
 }

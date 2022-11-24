@@ -3,7 +3,7 @@ module github.com/the-gigi/go-k8s
 go 1.19
 
 require (
-	github.com/google/go-github/v43 v43.0.0
+	github.com/google/go-github/v48 v48.1.0
 	github.com/google/uuid v1.3.0
 	github.com/onsi/ginkgo/v2 v2.5.1
 	github.com/onsi/gomega v1.24.1

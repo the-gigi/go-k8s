@@ -1,55 +1,64 @@
 package multi_cluster_lock
 
 import (
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	"io/ioutil"
 	"os"
 	"path"
+	"testing"
+
+	"github.com/stretchr/testify/suite"
 )
 
 const (
 	privateGistId = "18b035a3a81e5e64ac5c7b55301aeaf9"
 )
 
-var _ = Describe("Gist Client Tests", Ordered, func() {
+type GistClientTestSuite struct {
+	suite.Suite
+
+	cli     *GistClient
+	homeDir string
+}
+
+func (s *GistClientTestSuite) SetupSuite() {
 	var err error
-	var cli *GistClient
-	var homeDir string
+	s.homeDir, err = os.UserHomeDir()
+	s.Require().Nil(err)
 
-	BeforeAll(func() {
-		homeDir, err = os.UserHomeDir()
-		Ω(err).Should(BeNil())
+	filename := path.Join(s.homeDir, "github_api_token.txt")
+	token, err := os.ReadFile(filename)
+	s.Require().Nil(err)
+	s.cli = NewGistClient(string(token))
+	s.Require().Nil(err)
+}
 
-		filename := path.Join(homeDir, "github_api_token.txt")
-		token, err := ioutil.ReadFile(filename)
-		cli = NewGistClient(string(token[:len(token)-1]))
-		Ω(err).Should(BeNil())
-	})
+func (s *GistClientTestSuite) TestGetPrivateGist() {
+	data, err := s.cli.Get(privateGistId)
+	s.Require().Nil(err)
+	s.Require().Equal(data, "secret")
+}
 
-	It("should get private gist successfully", func() {
-		data, err := cli.Get(privateGistId)
-		Ω(err).Should(BeNil())
-		Ω(data).Should(Equal("secret"))
-	})
+func (s *GistClientTestSuite) TestUpdatePrivateGist() {
+	data, err := s.cli.Get(privateGistId)
+	s.Require().Nil(err)
+	s.Require().Equal(data, "secret")
 
-	It("should update private gist successfully", func() {
-		data, err := cli.Get(privateGistId)
-		Ω(err).Should(BeNil())
-		Ω(data).Should(Equal("secret"))
+	err = s.cli.Update(privateGistId, "secret2")
+	s.Require().Nil(err)
 
-		err = cli.Update(privateGistId, "secret2")
-		Ω(err).Should(BeNil())
+	data, err = s.cli.Get(privateGistId)
+	s.Require().Nil(err)
+	s.Require().Equal("secret2", data)
 
-		data, err = cli.Get(privateGistId)
-		Ω(err).Should(BeNil())
-		Ω(data).Should(Equal("secret2"))
+	err = s.cli.Update(privateGistId, "secret")
+	s.Require().Nil(err)
 
-		err = cli.Update(privateGistId, "secret")
-		Ω(err).Should(BeNil())
+	data, err = s.cli.Get(privateGistId)
+	s.Require().Nil(err)
+	s.Require().Equal("secret", data)
+}
 
-		data, err = cli.Get(privateGistId)
-		Ω(err).Should(BeNil())
-		Ω(data).Should(Equal("secret"))
-	})
-})
+// In order for 'go test' to run this suite, we need to create
+// a normal test function and pass our suite to suite.Run
+func TestGistClientTestSuite(t *testing.T) {
+	suite.Run(t, new(GistClientTestSuite))
+}

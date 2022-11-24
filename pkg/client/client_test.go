@@ -1,18 +1,17 @@
 package client
 
 import (
-	"context"
-	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
-	"os"
-	"path"
-	"testing"
-	"github.com/the-gigi/go-k8s/pkg/kind"
-	"github.com/the-gigi/kugo"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+    "context"
+    "fmt"
+    "github.com/stretchr/testify/suite"
+    "github.com/the-gigi/go-k8s/pkg/kind"
+    "github.com/the-gigi/kugo"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+    "k8s.io/apimachinery/pkg/runtime/schema"
+    "os"
+    "path"
+    "testing"
 )
 
 const (
@@ -31,27 +30,23 @@ type ClientTestSuite struct {
     pods    []unstructured.Unstructured
 }
 
-// assert operator similar to Gomega'a Ω
-var å *assert.Assertions
-
 func (s *ClientTestSuite) SetupSuite() {
-    å = s.Assert()
     s.podsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
     c, err := kind.New(clusterName, kind.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
-    å.Nil(err)
+    s.Require().Nil(err)
 
     err = c.Clear()
-    å.Nil(err)
+    s.Require().Nil(err)
     // Create namespace ns-1 and deploy 3 replicas of the pausecontainer
     cmd := fmt.Sprintf("create ns ns-1 --kubeconfig %s --context %s", kubeConfigFile, c.GetKubeContext())
     _, err = kugo.Run(cmd)
-    å.Nil(err)
+    s.Require().Nil(err)
 
     cmd = fmt.Sprintf(`create deployment test-deployment
 	                           --image %s --replicas 3 -n ns-1
 	                           --kubeconfig %s --context %s`, testImage, kubeConfigFile, c.GetKubeContext())
     _, err = kugo.Run(cmd)
-    å.Nil(err)
+    s.Require().Nil(err)
 
     // wait for deployment to be ready
     cmd = fmt.Sprintf(`wait deployment test-deployment --for condition=Available=True --timeout 60s
@@ -59,36 +54,36 @@ func (s *ClientTestSuite) SetupSuite() {
 	                             --kubeconfig %s
 	                             --context %s`, kubeConfigFile, c.GetKubeContext())
     _, err = kugo.Run(cmd)
-    å.Nil(err)
+    s.Require().Nil(err)
 }
 
 func (s *ClientTestSuite) TestGetPodsWithDynamicClient() {
     dynamicClient, err := NewDynamicClient(kubeConfigFile)
-    å.Nil(err)
-    å.NotNil(dynamicClient)
+    s.Require().Nil(err)
+    s.Require().NotNil(dynamicClient)
 
     podList, err := dynamicClient.Resource(s.podsGVR).Namespace("ns-1").List(context.Background(), metav1.ListOptions{})
-    å.Nil(err)
-    å.NotNil(podList)
+    s.Require().Nil(err)
+    s.Require().NotNil(podList)
 
     pods := podList.Items
-    å.NotNil(pods)
-    å.Len(pods, 3)
+    s.Require().NotNil(pods)
+    s.Require().Len(pods, 3)
 }
 
 func (s *ClientTestSuite) TestGetPodsWithClientset() {
     clientset, err := NewClientset(kubeConfigFile)
-    å.Nil(err)
-    å.NotNil(clientset)
+    s.Require().Nil(err)
+    s.Require().NotNil(clientset)
 
     podList, err := clientset.CoreV1().Pods("ns-1").List(context.Background(), metav1.ListOptions{})
-    å.Nil(err)
-    å.NotNil(podList)
+    s.Require().Nil(err)
+    s.Require().NotNil(podList)
 
     pods := podList.Items
-    å.NotNil(pods)
-    å.Len(pods, 3)
-    å.Equal(pods[0].Spec.Containers[0].Image, testImage)
+    s.Require().NotNil(pods)
+    s.Require().Len(pods, 3)
+    s.Require().Equal(pods[0].Spec.Containers[0].Image, testImage)
 }
 
 // In order for 'go test' to run this suite, we need to create
