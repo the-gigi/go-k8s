@@ -68,8 +68,8 @@ func (d *dynamicClient) GroupVersionResourceFor(gvk schema.GroupVersionKind) (gv
 	return
 }
 
-func NewDynamicClient(kubeConfigPath string) (client DynamicClient, err error) {
-	kubeConfig, err := getKubeConfig(kubeConfigPath)
+func NewDynamicClient(kubeConfigPath string, kubeContext string) (client DynamicClient, err error) {
+	kubeConfig, err := getKubeConfig(kubeConfigPath, kubeContext)
 	if err != nil {
 		return
 	}

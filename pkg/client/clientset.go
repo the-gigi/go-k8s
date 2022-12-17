@@ -6,9 +6,11 @@ import (
 
 type Clientset kubernetes.Interface
 
-func NewClientset(kubeConfigPath string) (client kubernetes.Interface, err error) {
-	kubeConfig, err := getKubeConfig(kubeConfigPath)
+func NewClientset(kubeConfigPath string, kubeContext string) (client Clientset, err error) {
+	kubeConfig, err := getKubeConfig(kubeConfigPath, kubeContext)
+	if err != nil {
+		return
+	}
 	client, err = kubernetes.NewForConfig(kubeConfig)
-
 	return
 }
