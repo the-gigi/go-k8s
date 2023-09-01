@@ -1,4 +1,4 @@
-package informer_test
+package informer
 
 import (
 	"testing"
@@ -9,5 +9,5 @@ import (
 
 func TestInformers(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Informerset Suite")
+	RunSpecs(t, "Informer Suite")
 }

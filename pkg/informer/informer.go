@@ -9,111 +9,127 @@ import (
 )
 
 type informer[T any] struct {
-	baseInformer
-	sink EventHandler[T]
+    base  baseInformer
+    sinks []EventHandler[T]
 }
 
 func (in *informer[T]) OnAdd(obj interface{}) {
-	u := obj.(*unstructured.Unstructured)
+    u := obj.(*unstructured.Unstructured)
 
-	var object T
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object)
-	if err != nil {
-		return
-	}
+    var object T
+    err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object)
+    if err != nil {
+        return
+    }
 
-	in.sink.OnAdd(object)
+    for _, sink := range in.sinks {
+        sink.OnAdd(object)
+    }
 }
 
 func (in *informer[T]) OnUpdate(oldObj interface{}, newObj interface{}) {
-	u := oldObj.(*unstructured.Unstructured)
+    u := oldObj.(*unstructured.Unstructured)
 
-	var oldObject T
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &oldObject)
-	if err != nil {
-		return
-	}
+    var oldObject T
+    err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &oldObject)
+    if err != nil {
+        return
+    }
 
-	u = newObj.(*unstructured.Unstructured)
+    u = newObj.(*unstructured.Unstructured)
 
-	var newObject T
-	err = runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &newObject)
-	if err != nil {
-		return
-	}
+    var newObject T
+    err = runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &newObject)
+    if err != nil {
+        return
+    }
 
-	in.sink.OnUpdate(oldObject, newObject)
+    for _, sink := range in.sinks {
+        sink.OnUpdate(oldObject, newObject)
+    }
 }
 
 func (in *informer[T]) OnDelete(obj interface{}) {
-	u := obj.(*unstructured.Unstructured)
+    u := obj.(*unstructured.Unstructured)
 
-	var object T
-	err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object)
-	if err != nil {
-		return
-	}
+    var object T
+    err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object)
+    if err != nil {
+        return
+    }
 
-	in.sink.OnAdd(object)
+    for _, sink := range in.sinks {
+        sink.OnAdd(object)
+    }
 }
 
 func (in *informer[T]) List(selector labels.Selector, namespace string) (objects []T, err error) {
-	var runtimeObjects []runtime.Object
-	if namespace == "" {
-		runtimeObjects, err = in.lister.List(selector)
-	} else {
-		runtimeObjects, err = in.lister.ByNamespace(namespace).List(selector)
-	}
+    var runtimeObjects []runtime.Object
+    if namespace == "" {
+        runtimeObjects, err = in.base.lister.List(selector)
+    } else {
+        runtimeObjects, err = in.base.lister.ByNamespace(namespace).List(selector)
+    }
 
-	if err != nil {
-		return
-	}
+    if err != nil {
+        return
+    }
 
-	// convert runtime objects to typed objects
-	for _, ro := range runtimeObjects {
-		var object T
-		err = runtime.DefaultUnstructuredConverter.FromUnstructured(ro.(*unstructured.Unstructured).Object, &object)
-		if err != nil {
-			return
-		}
-		objects = append(objects, object)
-	}
+    // convert runtime objects to typed objects
+    for _, ro := range runtimeObjects {
+        var object T
+        err = runtime.DefaultUnstructuredConverter.FromUnstructured(ro.(*unstructured.Unstructured).Object, &object)
+        if err != nil {
+            return
+        }
+        objects = append(objects, object)
+    }
 
-	return
+    return
 }
 
 func (in *informer[T]) Get(name string, obj *T) (err error) {
-	var ro runtime.Object
-	ro, err = in.lister.Get(name)
-	if err != nil {
-		return
-	}
+    var ro runtime.Object
+    ro, err = in.base.lister.Get(name)
+    if err != nil {
+        return
+    }
 
-	err = runtime.DefaultUnstructuredConverter.FromUnstructured(ro.(*unstructured.Unstructured).Object, &obj)
-	return
+    err = runtime.DefaultUnstructuredConverter.FromUnstructured(ro.(*unstructured.Unstructured).Object, &obj)
+    return
 }
 
-func NewInformer[T any](f Factory, gvr schema.GroupVersionResource, sink EventHandler[T]) (in *informer[T], err error) {
-	if f == nil {
-		err = errors.New("generic informer can't be nil")
-		return
-	}
+func (in *informer[T]) AddEventHandler(handler EventHandler[T]) (err error) {
+    if handler == nil {
+        err = errors.New("handler can't be nil")
+    }
+    in.sinks = append(in.sinks, handler)
+    return
+}
 
-	var bii BaseInformer
-	bii, err = f.GetBaseInformer(gvr)
-	if err != nil {
-		return
-	}
+func NewInformer[T any](f Factory, gvr schema.GroupVersionResource) (in Informer[T], err error) {
+    if f == nil {
+        err = errors.New("generic informer can't be nil")
+        return
+    }
 
-	bi, ok := bii.(*baseInformer)
-	if !ok {
-		err = errors.New("invalid base informer")
-		return
-	}
+    var bii BaseInformer
+    bii, err = f.GetBaseInformer(gvr)
+    if err != nil {
+        return
+    }
 
-	in = &informer[T]{
-		baseInformer: *bi,
-		sink:         sink,
-	}
-	return
+    bi, ok := bii.(*baseInformer)
+    if !ok {
+        err = errors.New("invalid base informer")
+        return
+    }
+
+    in = &informer[T]{
+        base: *bi,
+    }
+
+    bi.AddEventHandler(in.(*informer[T]))
+
+    return
 }

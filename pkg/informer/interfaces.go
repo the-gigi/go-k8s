@@ -26,7 +26,7 @@ type EventHandler[T any] interface {
 }
 
 type Informer[T any] interface {
-	AddEventHandler(handler EventHandler[T])
+	AddEventHandler(handler EventHandler[T]) error
 	List(selector labels.Selector, namespace string) (objects []T, err error)
 	Get(name string, obj *T) error
 }

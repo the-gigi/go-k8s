@@ -1,53 +1,66 @@
 package informer
 
 import (
-	"fmt"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/the-gigi/go-k8s/pkg/client"
 	"github.com/the-gigi/go-k8s/pkg/kind"
 	"github.com/the-gigi/kugo"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/cache"
-	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"os"
 )
 
-const (
-	clusterName = "go-k8s-client-test"
-	testImage   = "registry.k8s.io/pause:3.9"
-)
+type podEventHandler struct {
+	Added   []corev1.Pod
+	Updated []corev1.Pod // storing old, new one after the other for each update
+	Deleted []corev1.Pod
+}
 
-var kubeConfigFile = os.TempDir() + clusterName + "-kubeconfig"
+func (h *podEventHandler) OnAdd(obj corev1.Pod) {
+	if obj.Namespace == "ns-1" {
+		h.Added = append(h.Added, obj)
+	}
+}
 
-// createDeployment deploy 3 replicas of the pause container and waits for deployment to be ready
-func createDeployment() {
-	cmd := fmt.Sprintf("create deployment test-deployment --image %s --replicas 3 -n ns-1 --kubeconfig %s", testImage, kubeConfigFile)
-	_, err := kugo.Run(cmd)
-	Ω(err).Should(BeNil())
+func (h *podEventHandler) OnUpdate(oldObj corev1.Pod, newObj corev1.Pod) {
+	if oldObj.Namespace == "ns-1" {
+		h.Updated = append(h.Updated, oldObj, newObj)
+	}
+}
 
-	// wait for the deployment to exist (otherwise the subsequent wait command might fail)
-	cmd = "get deployment test-deployment -n ns-1 --kubeconfig " + kubeConfigFile
-	var done = make(chan struct{})
-	var output string
-	wait.Until(func() {
-		output, err = kugo.Run(cmd)
-		if err != nil || strings.Contains(output, "not found") {
-			return
-		}
-		close(done)
-	}, time.Second, done)
-	// wait for deployment to be ready
-	cmd = "wait deployment test-deployment --for condition=Available=True --timeout 60s -n ns-1 --kubeconfig " + kubeConfigFile
-	_, err = kugo.Run(cmd)
-	Ω(err).Should(BeNil())
+func (h *podEventHandler) OnDelete(obj corev1.Pod) {
+	if obj.GetNamespace() == "ns-1" {
+		h.Deleted = append(h.Deleted, obj)
+	}
+}
+
+type deploymentEventHandler struct {
+	Added   []appsv1.Deployment
+	Updated []appsv1.Deployment // storing old, new one after the other for each update
+	Deleted []appsv1.Deployment
+}
+
+func (h *deploymentEventHandler) OnAdd(obj appsv1.Deployment) {
+	if obj.Namespace == "ns-1" {
+		h.Added = append(h.Added, obj)
+	}
+}
+
+func (h *deploymentEventHandler) OnUpdate(oldObj appsv1.Deployment, newObj appsv1.Deployment) {
+	if oldObj.Namespace == "ns-1" {
+		h.Updated = append(h.Updated, oldObj, newObj)
+	}
+}
+
+func (h *deploymentEventHandler) OnDelete(obj appsv1.Deployment) {
+	if obj.GetNamespace() == "ns-1" {
+		h.Deleted = append(h.Deleted, obj)
+	}
 }
 
 var _ = Describe("Informer Tests", Ordered, func() {
@@ -59,7 +72,8 @@ var _ = Describe("Informer Tests", Ordered, func() {
 	var inf *informerFactory
 	var cluster *kind.Cluster
 	var options Options
-	var bii BaseInformer
+	var podInformer Informer[corev1.Pod]
+	var deploymentInformer Informer[appsv1.Deployment]
 
 	BeforeAll(func() {
 		cluster, err = kind.New(clusterName, kind.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
@@ -92,35 +106,18 @@ var _ = Describe("Informer Tests", Ordered, func() {
 	})
 
 	It("should successfully watch for ns-1 pods and deployments", func() {
-		var pods []string
-		var deployments []string
-
-		bii, err = inf.GetBaseInformer(podsGVR)
+		podInformer, err = NewInformer[corev1.Pod](inf, podsGVR)
 		Ω(err).Should(BeNil())
 
-		eh := cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				u := obj.(*unstructured.Unstructured)
-				if u.GetNamespace() != "ns-1" {
-					return
-				}
-				pods = append(pods, u.GetName())
-			},
-		}
-
-		bii.AddEventHandler(eh)
+		peh := &podEventHandler{}
+		err = podInformer.AddEventHandler(peh)
 		Ω(err).Should(BeNil())
 
-		bii, err = inf.GetBaseInformer(deploymentsGVR)
-		bii.AddEventHandler(cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				u := obj.(*unstructured.Unstructured)
-				if u.GetNamespace() != "ns-1" {
-					return
-				}
-				deployments = append(deployments, u.GetName())
-			},
-		})
+		deploymentInformer, err = NewInformer[appsv1.Deployment](inf, deploymentsGVR)
+		Ω(err).Should(BeNil())
+
+		deh := &deploymentEventHandler{}
+		err = deploymentInformer.AddEventHandler(deh)
 		Ω(err).Should(BeNil())
 
 		// Start listening
@@ -131,35 +128,29 @@ var _ = Describe("Informer Tests", Ordered, func() {
 
 		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
 		for i := 0; i < 5; i++ {
-			if len(pods) == 3 {
+			if len(peh.Added) == 3 {
 				break
 			}
 			time.Sleep(time.Second)
 		}
 
-		Ω(deployments).Should(HaveLen(1))
-		Ω(deployments[0]).Should(Equal("test-deployment"))
-		Ω(pods).Should(HaveLen(3))
-		for _, pod := range pods {
-			Ω(pod).Should(MatchRegexp("test-deployment-.*"))
+		Ω(deh.Added).Should(HaveLen(1))
+		Ω(deh.Added[0].Name).Should(Equal("test-deployment"))
+		Ω(peh.Added).Should(HaveLen(3))
+		for _, pod := range peh.Added {
+			Ω(pod.Name).Should(MatchRegexp("test-deployment-.*"))
 		}
-
-		objs, _ := bii.List(labels.NewSelector(), "ns-1")
-		Ω(objs).Should(HaveLen(1))
-
 		// Stop the informer
 		inf.Stop()
 	})
 
 	It("should successfully list ns-1 pods and deployments", func() {
-		var pods []runtime.Object
-		var podsInformer BaseInformer
-		podsInformer, err = inf.GetBaseInformer(podsGVR)
+		var podInformer Informer[corev1.Pod]
+		podInformer, err = NewInformer[corev1.Pod](inf, podsGVR)
 		Ω(err).Should(BeNil())
 
-		var deployments []runtime.Object
-		var deploymentsInformer BaseInformer
-		deploymentsInformer, err = inf.GetBaseInformer(deploymentsGVR)
+		var deploymentInformer Informer[appsv1.Deployment]
+		deploymentInformer, err = NewInformer[appsv1.Deployment](inf, deploymentsGVR)
 		Ω(err).Should(BeNil())
 
 		// Start listening
@@ -168,16 +159,19 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		// Create a deployment with 3 pods, which will generate events
 		createDeployment()
 
+		var pods []corev1.Pod
+		var deployments []appsv1.Deployment
+
 		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
 		for i := 0; i < 5; i++ {
-			pods, err = podsInformer.List(labels.NewSelector(), "ns-1")
+			pods, err = podInformer.List(labels.NewSelector(), "ns-1")
 			Ω(err).Should(BeNil())
 			if len(pods) == 3 {
 				break
 			}
 
 			// List the deployments
-			deployments, err = deploymentsInformer.List(labels.NewSelector(), "ns-1")
+			deployments, err = deploymentInformer.List(labels.NewSelector(), "ns-1")
 			Ω(err).Should(BeNil())
 
 			time.Sleep(time.Second)
@@ -185,19 +179,21 @@ var _ = Describe("Informer Tests", Ordered, func() {
 
 		Ω(pods).Should(HaveLen(3))
 		for _, pod := range pods {
-			u := pod.(*unstructured.Unstructured)
-			if u.GetNamespace() != "ns-1" {
-				return
-			}
-			Ω(u.GetName()).Should(MatchRegexp("test-deployment-.*"))
+			Ω(pod.Name).Should(MatchRegexp("test-deployment-.*"))
 		}
 
 		// List the deployments
-		deployments, err = deploymentsInformer.List(labels.NewSelector(), "ns-1")
+		deployments, err = deploymentInformer.List(labels.NewSelector(), "ns-1")
 		Ω(err).Should(BeNil())
-		Ω(deployments).Should(HaveLen(1))
-		deployment := deployments[0].(*unstructured.Unstructured)
-		Ω(deployment.GetName()).Should(Equal("test-deployment"))
+		found := false
+		for _, deployment := range deployments {
+			if deployment.Name == "test-deployment" {
+				found = true
+				break
+			}
+		}
+
+		Ω(found).Should(BeTrue())
 
 		// Stop the informer
 		inf.Stop()

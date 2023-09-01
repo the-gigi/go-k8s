@@ -102,7 +102,7 @@ func (c *cluster) GetDynamicClient() (cli client.DynamicClient, err error) {
 		err = errors.New("can't get dynamic client without a dedicated kube config file")
 	}
 
-	cli, err = client.NewDynamicClient(kubeConfig)
+	cli, err = client.NewDynamicClient(kubeConfig, "")
 	return
 }
 
