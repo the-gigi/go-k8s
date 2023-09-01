@@ -1,4 +1,4 @@
-package informerset
+package informer
 
 import (
 	"github.com/pkg/errors"
@@ -8,16 +8,16 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-type informer struct {
+type baseInformer struct {
 	sharedIndexInformer cache.SharedIndexInformer
 	lister              cache.GenericLister
 }
 
-func (in *informer) AddEventHandler(handler cache.ResourceEventHandler) {
+func (in *baseInformer) AddEventHandler(handler cache.ResourceEventHandler) {
 	in.sharedIndexInformer.AddEventHandler(handler)
 }
 
-func (in *informer) List(selector labels.Selector, namespace string) (objects []runtime.Object, err error) {
+func (in *baseInformer) List(selector labels.Selector, namespace string) (objects []runtime.Object, err error) {
 	if namespace == "" {
 		objects, err = in.lister.List(selector)
 		return
@@ -26,16 +26,16 @@ func (in *informer) List(selector labels.Selector, namespace string) (objects []
 	return
 }
 
-func (in *informer) Get(name string) (runtime.Object, error) {
+func (in *baseInformer) Get(name string) (runtime.Object, error) {
 	return in.lister.Get(name)
 }
 
-func newInformer(gi informers.GenericInformer) (in *informer, err error) {
+func newBaseInformer(gi informers.GenericInformer) (in *baseInformer, err error) {
 	if gi == nil {
-		err = errors.New("generic informer can't be nil")
+		err = errors.New("generic baseInformer can't be nil")
 		return
 	}
-	in = &informer{
+	in = &baseInformer{
 		sharedIndexInformer: gi.Informer(),
 		lister:              gi.Lister(),
 	}

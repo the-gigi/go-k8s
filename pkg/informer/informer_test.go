@@ -1,4 +1,4 @@
-package informerset
+package informer
 
 import (
 	"fmt"
@@ -22,7 +22,7 @@ import (
 
 const (
 	clusterName = "go-k8s-client-test"
-	testImage   = "k8s.gcr.io/pause:3.1"
+	testImage   = "registry.k8s.io/pause:3.9"
 )
 
 var kubeConfigFile = os.TempDir() + clusterName + "-kubeconfig"
@@ -56,24 +56,21 @@ var _ = Describe("Informer Tests", Ordered, func() {
 	var podsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	var deploymentsGVR = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
 	var dynamicClient dynamic.Interface
-	var ins Informerset
+	var inf *informerFactory
 	var cluster *kind.Cluster
 	var options Options
+	var bii BaseInformer
 
 	BeforeAll(func() {
 		cluster, err = kind.New(clusterName, kind.Options{TakeOver: true, KubeConfigFile: kubeConfigFile})
 		Ω(err).Should(BeNil())
 
-		dynamicClient, err = client.NewDynamicClient(kubeConfigFile)
+		dynamicClient, err = client.NewDynamicClient(kubeConfigFile, "")
 		Ω(err).Should(BeNil())
-
-		gvrs := []schema.GroupVersionResource{
-			podsGVR,
-			deploymentsGVR,
-		}
 		options = Options{
-			Gvrs:   gvrs,
-			Client: dynamicClient,
+			Client:        dynamicClient,
+			DefaultResync: 0,
+			WaitForSync:   true,
 		}
 	})
 
@@ -85,38 +82,49 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		_, err = kugo.Run("create ns ns-1 --kubeconfig " + cluster.GetKubeConfig())
 		Ω(err).Should(BeNil())
 
-		ins, err = NewInformerset(options)
+		var f Factory
+		f, err = NewInformerFactory(options)
 		Ω(err).Should(BeNil())
+
+		var ok bool
+		inf, ok = f.(*informerFactory)
+		Ω(ok).Should(BeTrue())
 	})
 
 	It("should successfully watch for ns-1 pods and deployments", func() {
-		pods := []string{}
-		deployments := []string{}
-		go func() {
-			err = ins.AddEventHandler(podsGVR, cache.ResourceEventHandlerFuncs{
-				AddFunc: func(obj interface{}) {
-					u := obj.(*unstructured.Unstructured)
-					if u.GetNamespace() != "ns-1" {
-						return
-					}
-					pods = append(pods, u.GetName())
-				},
-			})
-			Ω(err).Should(BeNil())
-			err = ins.AddEventHandler(deploymentsGVR, cache.ResourceEventHandlerFuncs{
-				AddFunc: func(obj interface{}) {
-					u := obj.(*unstructured.Unstructured)
-					if u.GetNamespace() != "ns-1" {
-						return
-					}
-					deployments = append(deployments, u.GetName())
-				},
-			})
-			Ω(err).Should(BeNil())
-		}()
+		var pods []string
+		var deployments []string
+
+		bii, err = inf.GetBaseInformer(podsGVR)
+		Ω(err).Should(BeNil())
+
+		eh := cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				u := obj.(*unstructured.Unstructured)
+				if u.GetNamespace() != "ns-1" {
+					return
+				}
+				pods = append(pods, u.GetName())
+			},
+		}
+
+		bii.AddEventHandler(eh)
+		Ω(err).Should(BeNil())
+
+		bii, err = inf.GetBaseInformer(deploymentsGVR)
+		bii.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				u := obj.(*unstructured.Unstructured)
+				if u.GetNamespace() != "ns-1" {
+					return
+				}
+				deployments = append(deployments, u.GetName())
+			},
+		})
+		Ω(err).Should(BeNil())
 
 		// Start listening
-		ins.Start()
+		inf.Start()
 
 		// Create a deployment with 3 pods, which will generate events
 		createDeployment()
@@ -136,51 +144,62 @@ var _ = Describe("Informer Tests", Ordered, func() {
 			Ω(pod).Should(MatchRegexp("test-deployment-.*"))
 		}
 
+		objs, _ := bii.List(labels.NewSelector(), "ns-1")
+		Ω(objs).Should(HaveLen(1))
+
 		// Stop the informer
-		ins.Stop()
+		inf.Stop()
 	})
 
 	It("should successfully list ns-1 pods and deployments", func() {
-		pods := []runtime.Object{}
-		deployments := []runtime.Object{}
+		var pods []runtime.Object
+		var podsInformer BaseInformer
+		podsInformer, err = inf.GetBaseInformer(podsGVR)
+		Ω(err).Should(BeNil())
+
+		var deployments []runtime.Object
+		var deploymentsInformer BaseInformer
+		deploymentsInformer, err = inf.GetBaseInformer(deploymentsGVR)
+		Ω(err).Should(BeNil())
 
 		// Start listening
-		ins.Start()
+		inf.Start()
 
 		// Create a deployment with 3 pods, which will generate events
 		createDeployment()
 
 		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
-		selector := labels.NewSelector()
-		ok := false
-		var objectMap map[schema.GroupVersionResource][]runtime.Object
 		for i := 0; i < 5; i++ {
-			objectMap, err = ins.List(selector, "ns-1")
+			pods, err = podsInformer.List(labels.NewSelector(), "ns-1")
 			Ω(err).Should(BeNil())
-			pods, ok = objectMap[podsGVR]
-			if ok && len(pods) == 3 {
+			if len(pods) == 3 {
 				break
 			}
+
+			// List the deployments
+			deployments, err = deploymentsInformer.List(labels.NewSelector(), "ns-1")
+			Ω(err).Should(BeNil())
+
 			time.Sleep(time.Second)
 		}
 
-		deployments = objectMap[deploymentsGVR]
-		Ω(deployments).Should(HaveLen(1))
-		deployment, err := runtime.DefaultUnstructuredConverter.ToUnstructured(deployments[0])
-		Ω(err).Should(BeNil())
-		metadata := deployment["metadata"].(map[string]interface{})
-		name := metadata["name"].(string)
-		Ω(name).Should(Equal("test-deployment"))
 		Ω(pods).Should(HaveLen(3))
-		for i := range pods {
-			pod, err := runtime.DefaultUnstructuredConverter.ToUnstructured(pods[i])
-			Ω(err).Should(BeNil())
-			metadata := pod["metadata"].(map[string]interface{})
-			name = metadata["name"].(string)
-			Ω(name).Should(MatchRegexp("test-deployment-.*"))
+		for _, pod := range pods {
+			u := pod.(*unstructured.Unstructured)
+			if u.GetNamespace() != "ns-1" {
+				return
+			}
+			Ω(u.GetName()).Should(MatchRegexp("test-deployment-.*"))
 		}
 
+		// List the deployments
+		deployments, err = deploymentsInformer.List(labels.NewSelector(), "ns-1")
+		Ω(err).Should(BeNil())
+		Ω(deployments).Should(HaveLen(1))
+		deployment := deployments[0].(*unstructured.Unstructured)
+		Ω(deployment.GetName()).Should(Equal("test-deployment"))
+
 		// Stop the informer
-		ins.Stop()
+		inf.Stop()
 	})
 })

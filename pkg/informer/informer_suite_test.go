@@ -1,4 +1,4 @@
-package informerset_test
+package informer_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestInformerset(t *testing.T) {
+func TestInformers(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Informerset Suite")
 }
