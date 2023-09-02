@@ -3,6 +3,7 @@ package multi_cluster_lock
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/pkg/errors"
 	"io"
 	"net/http"
 	"strings"
@@ -15,11 +16,9 @@ const (
 type GistClient struct {
 	cli         *http.Client
 	accessToken string
-
-	// client *github.Client
 }
 
-func (gc *GistClient) get(id string) (obj map[string]interface{}, err error) {
+func (gc *GistClient) get(id string) (obj map[string]any, err error) {
 	url := baseURL + id
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -48,7 +47,7 @@ func (gc *GistClient) get(id string) (obj map[string]interface{}, err error) {
 	return
 }
 
-func (gc *GistClient) update(id string, obj map[string]interface{}) (err error) {
+func (gc *GistClient) update(id string, obj map[string]any) (err error) {
 	data, err := json.Marshal(obj)
 	if err != nil {
 		return
@@ -78,10 +77,21 @@ func (gc *GistClient) Get(id string) (data string, err error) {
 		return
 	}
 
-	fileMap := obj["files"].(map[string]interface{})
+	files, ok := obj["files"]
+	if !ok {
+		var message string
+		_, ok = obj["message"]
+		if ok {
+			message = obj["message"].(string)
+		}
+		err = errors.Errorf("failed to get gist [%s]", message)
+		return
+	}
+
+	fileMap := files.(map[string]any)
 	// get content of the first file
 	for _, file := range fileMap {
-		rawData := file.(map[string]interface{})["content"]
+		rawData := file.(map[string]any)["content"]
 		data = rawData.(string)
 		break
 	}
@@ -102,10 +112,10 @@ func (gc *GistClient) Update(id string, data string) (err error) {
 		return
 	}
 
-	fileMap := gist["files"].(map[string]interface{})
+	fileMap := gist["files"].(map[string]any)
 	// get content of the first file
 	for _, file := range fileMap {
-		file.(map[string]interface{})["content"] = data
+		file.(map[string]any)["content"] = data
 		break
 	}
 

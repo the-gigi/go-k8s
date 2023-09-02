@@ -49,15 +49,21 @@ func run(args ...string) (combinedOutput string, err error) {
 	return
 }
 
-func getClusters() (clusters []string, err error) {
-	output, err := run("get", "clusters")
+func getClusters() (clusters map[string]bool, err error) {
+	clusters = make(map[string]bool)
+
+	output, err := run("get clusters")
 	if err != nil {
+		return
+	}
+
+	if output == "No kind clusters found.\n" {
 		return
 	}
 
 	for _, cluster := range strings.Split(output, "\n") {
 		if cluster != "" {
-			clusters = append(clusters, cluster)
+			clusters[cluster] = true
 		}
 	}
 	return

@@ -14,7 +14,6 @@ colima start --cpu 6 --memory 12
 You can find node images here:
 find the images with hash https://github.com/kubernetes-sigs/kind/releases
 
-
 # Interesting project
 
 https://github.com/Trendyol/kink

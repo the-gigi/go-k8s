@@ -35,11 +35,24 @@ type Interface interface {
 }
 ```
 
+# Gist lock
+
+The [gist_lock](gist_lock.go) is a multi-cluster lock implementation that uses a Github gist as the HA storage. It uses the [gist_client](gist_client.go) to interact with the Github gist API. The [gist_client_test](gist_client_test.go) requires Github API credentials, that it reads from a file called `github_api_token.txt` in th home directory. If you want to run the tests you need to create this file and add your Github API token. You can get an API token it here: https://github.com/settings/tokens.
+
+Create your own private gist here:
+https://gist.github.com
+
+Change the gist ID in the `gist_client_test.go` file and you're good to go.
+
+```
+const (
+	privateGistId = "18b035a3a81e5e64ac5c7b55301aeaf9"
+)
+```
+
 # Reference
 
 - https://github.com/kubernetes/client-go/tree/master/tools/leader-election
 - https://github.com/kubernetes/client-go/tree/master/examples/leader-election
 - https://itnext.io/leader-election-in-kubernetes-using-client-go-a19cbe7a9a85
-
-
 

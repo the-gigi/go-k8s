@@ -55,11 +55,8 @@ func (c *Cluster) Exists() (exists bool, err error) {
 		return
 	}
 
-	for _, cluster := range clusters {
-		if cluster == c.name {
-			exists = true
-			return
-		}
+	if clusters[c.name] {
+		exists = true
 	}
 	return
 }
@@ -146,7 +143,7 @@ func New(name string, options Options) (cluster *Cluster, err error) {
 	}
 
 	if options.KubeConfigFile == defaultKubeConfig {
-		err = errors.New("can't overwite default kubeconfig")
+		err = errors.New("can't overwrite default kubeconfig")
 		return
 	}
 
