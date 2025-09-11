@@ -13,7 +13,7 @@ type informer[T any] struct {
     sinks []EventHandler[T]
 }
 
-func (in *informer[T]) OnAdd(obj interface{}) {
+func (in *informer[T]) OnAdd(obj interface{}, isInInitialList bool) {
     u := obj.(*unstructured.Unstructured)
 
     var object T

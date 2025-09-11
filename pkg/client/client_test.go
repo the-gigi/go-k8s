@@ -48,7 +48,10 @@ func (s *ClientTestSuite) SetupSuite() {
 	s.Require().Nil(err)
 	
 	fmt.Println("Creating namespace and deploying pause container...")
-	// Create namespace ns-1 and deploy 3 replicas of the pausecontainer
+	// Delete namespace ns-1 if it exists, then create it
+	cmd = fmt.Sprintf("delete ns ns-1 --kubeconfig %s --context %s --ignore-not-found=true", kubeConfigFile, c.GetKubeContext())
+	_, _ = kugo.Run(cmd) // Ignore errors as namespace may not exist
+	
 	cmd = fmt.Sprintf("create ns ns-1 --kubeconfig %s --context %s", kubeConfigFile, c.GetKubeContext())
 	_, err = kugo.Run(cmd)
 	s.Require().Nil(err)
