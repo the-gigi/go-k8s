@@ -2,8 +2,8 @@ package multi_cluster_lock
 
 import (
 	"os"
-	"path"
 
+	"github.com/joho/godotenv"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -14,17 +14,18 @@ const (
 
 var _ = Describe("GistClient", func() {
 	var cli *GistClient
-	var homeDir string
 
 	BeforeEach(func() {
-		var err error
-		homeDir, err = os.UserHomeDir()
-		Ω(err).Should(BeNil())
-
-		filename := path.Join(homeDir, "github_api_token.txt")
-		token, err := os.ReadFile(filename)
-		Ω(err).Should(BeNil())
-		cli = NewGistClient(string(token))
+		// Try to load .env file from project root (walk up directories to find it)
+		_ = godotenv.Load("../../.env")
+		
+		// Get GitHub token from environment variable
+		token := os.Getenv("GITHUB_API_TOKEN")
+		if token == "" {
+			Skip("GITHUB_API_TOKEN not set in environment or .env file - skipping integration tests")
+		}
+		
+		cli = NewGistClient(token)
 		Ω(cli).ShouldNot(BeNil())
 	})
 

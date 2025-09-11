@@ -125,7 +125,7 @@ var _ = Describe("Cluster tests", Ordered, func() {
 				err = os.Remove(filename)
 				Ω(err).To(BeNil())
 			} else {
-				Ω(err).Should(Equal(os.ErrNotExist))
+				Ω(os.IsNotExist(err)).Should(BeTrue())
 			}
 			cluster, err = New(clusterName, Options{TakeOver: true, KubeConfigFile: filename})
 			Ω(err).To(BeNil())

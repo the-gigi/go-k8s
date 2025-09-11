@@ -39,15 +39,22 @@ func (s *ClientTestSuite) SetupSuite() {
 
 	err = c.Clear()
 	s.Require().Nil(err)
+	
+	fmt.Println("Waiting for cluster to be ready...")
+	// Wait for node to be ready (CNI should be handled by Kind)
+	cmd := fmt.Sprintf(`wait --for=condition=ready node --all --timeout=120s --kubeconfig %s --context %s`, 
+		kubeConfigFile, c.GetKubeContext())
+	_, err = kugo.Run(cmd)
+	s.Require().Nil(err)
+	
 	fmt.Println("Creating namespace and deploying pause container...")
 	// Create namespace ns-1 and deploy 3 replicas of the pausecontainer
-	cmd := fmt.Sprintf("create ns ns-1 --kubeconfig %s --context %s", kubeConfigFile, c.GetKubeContext())
+	cmd = fmt.Sprintf("create ns ns-1 --kubeconfig %s --context %s", kubeConfigFile, c.GetKubeContext())
 	_, err = kugo.Run(cmd)
 	s.Require().Nil(err)
 
-	cmd = fmt.Sprintf(`create deployment test-deployment
-	                           --image %s --replicas 3 -n ns-1
-	                           --kubeconfig %s --context %s`, testImage, kubeConfigFile, c.GetKubeContext())
+	cmd = fmt.Sprintf(`create deployment test-deployment --image %s --replicas 3 -n ns-1 --kubeconfig %s --context %s`, 
+		testImage, kubeConfigFile, c.GetKubeContext())
 	_, err = kugo.Run(cmd)
 	s.Require().Nil(err)
 

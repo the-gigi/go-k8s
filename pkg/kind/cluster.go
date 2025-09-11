@@ -1,12 +1,14 @@
 package kind
 
 import (
+	"context"
 	"fmt"
 	"github.com/pkg/errors"
 	//"github.com/the-gigi/go-k8s/pkg/client"
 	"github.com/the-gigi/kugo"
 	"os"
 	"strings"
+	"time"
 )
 
 var (
@@ -27,7 +29,12 @@ type Cluster struct {
 
 // Delete - deletes a cluster by name
 func (c *Cluster) Delete() (err error) {
-	output, err := run("delete", "cluster", "--name", c.name)
+	return c.DeleteWithContext(context.Background())
+}
+
+// DeleteWithContext - deletes a cluster by name with context support
+func (c *Cluster) DeleteWithContext(ctx context.Context) (err error) {
+	output, err := runWithContext(ctx, "delete", "cluster", "--name", c.name)
 	if err != nil {
 		err = errors.Wrapf(err, "stderr: %s", output)
 	}
@@ -36,7 +43,12 @@ func (c *Cluster) Delete() (err error) {
 
 // GetNodes returns the list of nodes in the cluster
 func (c *Cluster) GetNodes() (nodes []string, err error) {
-	output, err := run("get", "nodes", "--name", c.name)
+	return c.GetNodesWithContext(context.Background())
+}
+
+// GetNodesWithContext returns the list of nodes in the cluster with context support
+func (c *Cluster) GetNodesWithContext(ctx context.Context) (nodes []string, err error) {
+	output, err := runWithContext(ctx, "get", "nodes", "--name", c.name)
 	if err != nil {
 		return
 	}
@@ -124,6 +136,8 @@ type Options struct {
 	TakeOver       bool   // if true, take over an existing cluster with same name
 	Recreate       bool   // if true, delete existing cluster and create a new one
 	KubeConfigFile string // if not empty, save cluster's kubeconfig to a file
+	ConfigFile     string // if not empty, use this Kind config file for cluster creation
+	Wait           time.Duration // timeout for cluster creation (default: 0 = no timeout)
 }
 
 // New - create a new cluster
@@ -136,6 +150,11 @@ type Options struct {
 // If it exists and TakeOver is true it will just use the existing cluster
 // If it exists and Recreate is selected it will delete the existing cluster and create it from scratch.
 func New(name string, options Options) (cluster *Cluster, err error) {
+	return NewWithContext(context.Background(), name, options)
+}
+
+// NewWithContext - create a new cluster with context support
+func NewWithContext(ctx context.Context, name string, options Options) (cluster *Cluster, err error) {
 	// Validate the options
 	if options.Recreate && options.TakeOver {
 		err = errors.New("invalid options. At most one option can be true")
@@ -156,7 +175,7 @@ func New(name string, options Options) (cluster *Cluster, err error) {
 	var output string
 	// Delete existing cluster if options.Recreate is true and sets exists to false
 	if exists && options.Recreate {
-		output, err = run("delete", "cluster", "--name", name)
+		output, err = runWithContext(ctx, "delete", "cluster", "--name", name)
 		if err != nil {
 			err = errors.Wrap(err, output)
 			return
@@ -170,7 +189,7 @@ func New(name string, options Options) (cluster *Cluster, err error) {
 			return
 		}
 
-		kubeConfig, err := run("get", "kubeconfig", "--name", name)
+		kubeConfig, err := runWithContext(ctx, "get", "kubeconfig", "--name", name)
 		if err != nil {
 			return
 		}
@@ -183,9 +202,22 @@ func New(name string, options Options) (cluster *Cluster, err error) {
 		if options.KubeConfigFile != "" {
 			args = append(args, "--kubeconfig", options.KubeConfigFile)
 		}
-		output, err = run(args...)
+		if options.ConfigFile != "" {
+			args = append(args, "--config", options.ConfigFile)
+		}
+		if options.Wait > 0 {
+			args = append(args, "--wait", options.Wait.String())
+		}
+		output, err = runWithContext(ctx, args...)
 		if err != nil {
 			err = errors.Wrap(err, output)
+			return
+		}
+		
+		// Ensure CNI is properly installed and working
+		err = cluster.ensureCNI(ctx)
+		if err != nil {
+			return
 		}
 		return
 	}
@@ -197,4 +229,79 @@ func New(name string, options Options) (cluster *Cluster, err error) {
 
 	// If we get here it means we take over the existing cluster. Nothing to do :-)
 	return
+}
+
+// LoadDockerImage loads a Docker image into the cluster
+func (c *Cluster) LoadDockerImage(imageName string) error {
+	return c.LoadDockerImageWithContext(context.Background(), imageName)
+}
+
+// LoadDockerImageWithContext loads a Docker image into the cluster with context support
+func (c *Cluster) LoadDockerImageWithContext(ctx context.Context, imageName string) error {
+	output, err := runWithContext(ctx, "load", "docker-image", imageName, "--name", c.name)
+	if err != nil {
+		return errors.Wrapf(err, "failed to load image %s: %s", imageName, output)
+	}
+	return nil
+}
+
+// LoadDockerImages loads multiple Docker images into the cluster
+func (c *Cluster) LoadDockerImages(imageNames []string) error {
+	return c.LoadDockerImagesWithContext(context.Background(), imageNames)
+}
+
+// LoadDockerImagesWithContext loads multiple Docker images into the cluster with context support
+func (c *Cluster) LoadDockerImagesWithContext(ctx context.Context, imageNames []string) error {
+	for _, imageName := range imageNames {
+		if err := c.LoadDockerImageWithContext(ctx, imageName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// LoadArchive loads a Docker image from a tar archive into the cluster
+func (c *Cluster) LoadArchive(archivePath string) error {
+	return c.LoadArchiveWithContext(context.Background(), archivePath)
+}
+
+// LoadArchiveWithContext loads a Docker image from a tar archive into the cluster with context support
+func (c *Cluster) LoadArchiveWithContext(ctx context.Context, archivePath string) error {
+	output, err := runWithContext(ctx, "load", "image-archive", archivePath, "--name", c.name)
+	if err != nil {
+		return errors.Wrapf(err, "failed to load archive %s: %s", archivePath, output)
+	}
+	return nil
+}
+
+// ensureCNI installs and validates that CNI is working properly
+func (c *Cluster) ensureCNI(ctx context.Context) error {
+	// First check if CNI is already working by checking node status
+	output, err := kugo.Run("get", "nodes", "--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	if err == nil && strings.Contains(output, "Ready") {
+		return nil // CNI is already working
+	}
+	
+	// Install Calico CNI (more reliable with Kind)
+	_, err = kugo.Run("apply", "-f", "https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/tigera-operator.yaml",
+		"--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	if err != nil {
+		return errors.Wrap(err, "failed to install Calico operator")
+	}
+	
+	// Apply the Calico custom resources
+	_, err = kugo.Run("apply", "-f", "https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/custom-resources.yaml",
+		"--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	if err != nil {
+		return errors.Wrap(err, "failed to install Calico")
+	}
+	
+	// Wait for CNI to be ready and nodes to become Ready
+	_, err = kugo.Run("wait", "--for=condition=ready", "node", "--all", "--timeout=120s",
+		"--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	if err != nil {
+		return errors.Wrap(err, "nodes did not become ready after CNI installation")
+	}
+	
+	return nil
 }
