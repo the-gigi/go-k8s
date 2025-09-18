@@ -40,14 +40,37 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		}
 	})
 
+	AfterEach(func() {
+		// Stop the informer before cleanup to ensure proper ordering
+		if inf != nil {
+			inf.Stop()
+			// Wait for informer to fully stop and drain any pending events
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		// Clear any remaining resources in the test namespace
+		if cluster != nil {
+			// Delete all deployments in ns-1
+			_, _ = kugo.Run("delete deployments --all -n ns-1 --kubeconfig " + cluster.GetKubeConfig())
+			// Delete all pods in ns-1
+			_, _ = kugo.Run("delete pods --all -n ns-1 --kubeconfig " + cluster.GetKubeConfig())
+			// Wait for cleanup to complete
+			time.Sleep(300 * time.Millisecond)
+		}
+	})
+
 	BeforeEach(func() {
 		err = cluster.Clear()
 		Ω(err).Should(BeNil())
+
+		// Wait for cluster to be fully cleared and caches to reset
+		time.Sleep(500 * time.Millisecond)
 
 		// Create namespace ns-1
 		_, err = kugo.Run("create ns ns-1 --kubeconfig " + cluster.GetKubeConfig())
 		Ω(err).Should(BeNil())
 
+		// Create a fresh informer factory for each test to avoid shared state
 		var f Factory
 		f, err = NewInformerFactory(options)
 		Ω(err).Should(BeNil())
@@ -55,6 +78,9 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		var ok bool
 		inf, ok = f.(*informerFactory)
 		Ω(ok).Should(BeTrue())
+
+		// Reset any global test state
+		bii = nil
 	})
 
 	It("should successfully watch for ns-1 pods and deployments", func() {
@@ -93,7 +119,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		inf.Start()
 
 		// Create a deployment with 3 pods, which will generate events
-		createDeployment()
+		deploymentName := createDeployment()
 
 		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
 		for i := 0; i < 5; i++ {
@@ -104,10 +130,10 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		}
 
 		Ω(deployments).Should(HaveLen(1))
-		Ω(deployments[0]).Should(Equal("test-deployment"))
+		Ω(deployments[0]).Should(Equal(deploymentName))
 		Ω(pods).Should(HaveLen(3))
 		for _, pod := range pods {
-			Ω(pod).Should(MatchRegexp("test-deployment-.*"))
+			Ω(pod).Should(MatchRegexp(deploymentName + "-.*"))
 		}
 
 		objs, _ := bii.List(labels.NewSelector(), "ns-1")
@@ -132,7 +158,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		inf.Start()
 
 		// Create a deployment with 3 pods, which will generate events
-		createDeployment()
+		deploymentName := createDeployment()
 
 		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
 		for i := 0; i < 5; i++ {
@@ -155,7 +181,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 			if u.GetNamespace() != "ns-1" {
 				return
 			}
-			Ω(u.GetName()).Should(MatchRegexp("test-deployment-.*"))
+			Ω(u.GetName()).Should(MatchRegexp(deploymentName + "-.*"))
 		}
 
 		// List the deployments
@@ -163,7 +189,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		Ω(err).Should(BeNil())
 		Ω(deployments).Should(HaveLen(1))
 		deployment := deployments[0].(*unstructured.Unstructured)
-		Ω(deployment.GetName()).Should(Equal("test-deployment"))
+		Ω(deployment.GetName()).Should(Equal(deploymentName))
 
 		// Stop the informer
 		inf.Stop()

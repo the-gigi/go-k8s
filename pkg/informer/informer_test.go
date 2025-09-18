@@ -124,7 +124,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		inf.Start()
 
 		// Create a deployment with 3 pods, which will generate events
-		createDeployment()
+		deploymentName := createDeployment()
 
 		// Wait for all 3 pods of the deployment to be created or until 5 seconds have passed
 		for i := 0; i < 5; i++ {
@@ -135,10 +135,10 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		}
 
 		Ω(deh.Added).Should(HaveLen(1))
-		Ω(deh.Added[0].Name).Should(Equal("test-deployment"))
+		Ω(deh.Added[0].Name).Should(Equal(deploymentName))
 		Ω(peh.Added).Should(HaveLen(3))
 		for _, pod := range peh.Added {
-			Ω(pod.Name).Should(MatchRegexp("test-deployment-.*"))
+			Ω(pod.Name).Should(MatchRegexp(deploymentName + "-.*"))
 		}
 		// Stop the informer
 		inf.Stop()
@@ -157,7 +157,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		inf.Start()
 
 		// Create a deployment with 3 pods, which will generate events
-		createDeployment()
+		deploymentName := createDeployment()
 
 		var pods []corev1.Pod
 		var deployments []appsv1.Deployment
@@ -179,7 +179,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 
 		Ω(pods).Should(HaveLen(3))
 		for _, pod := range pods {
-			Ω(pod.Name).Should(MatchRegexp("test-deployment-.*"))
+			Ω(pod.Name).Should(MatchRegexp(deploymentName + "-.*"))
 		}
 
 		// List the deployments
@@ -187,7 +187,7 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		Ω(err).Should(BeNil())
 		found := false
 		for _, deployment := range deployments {
-			if deployment.Name == "test-deployment" {
+			if deployment.Name == deploymentName {
 				found = true
 				break
 			}
