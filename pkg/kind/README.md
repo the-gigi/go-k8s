@@ -1,6 +1,6 @@
 # kind
 
-The `kind` package provides a Go interface for creating and deleting [kind]() clusters.
+The `kind` package provides a Go interface for creating and deleting [KinD](https://kind.sigs.k8s.io) clusters.
 
 When creating multiple kind clusters make sure your Docker VM has enough CPU and memory.
 

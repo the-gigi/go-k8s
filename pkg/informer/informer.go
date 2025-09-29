@@ -6,6 +6,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/klog/v2"
 )
 
 type informer[T any] struct {
@@ -19,6 +20,7 @@ func (in *informer[T]) OnAdd(obj interface{}, isInInitialList bool) {
     var object T
     err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object)
     if err != nil {
+        klog.Errorf("Failed to convert unstructured object in OnAdd: %v (object: %s/%s)", err, u.GetNamespace(), u.GetName())
         return
     }
 
@@ -33,6 +35,7 @@ func (in *informer[T]) OnUpdate(oldObj interface{}, newObj interface{}) {
     var oldObject T
     err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &oldObject)
     if err != nil {
+        klog.Errorf("Failed to convert old unstructured object in OnUpdate: %v (object: %s/%s)", err, u.GetNamespace(), u.GetName())
         return
     }
 
@@ -41,6 +44,7 @@ func (in *informer[T]) OnUpdate(oldObj interface{}, newObj interface{}) {
     var newObject T
     err = runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &newObject)
     if err != nil {
+        klog.Errorf("Failed to convert new unstructured object in OnUpdate: %v (object: %s/%s)", err, u.GetNamespace(), u.GetName())
         return
     }
 
@@ -55,11 +59,12 @@ func (in *informer[T]) OnDelete(obj interface{}) {
     var object T
     err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &object)
     if err != nil {
+        klog.Errorf("Failed to convert unstructured object in OnDelete: %v (object: %s/%s)", err, u.GetNamespace(), u.GetName())
         return
     }
 
     for _, sink := range in.sinks {
-        sink.OnAdd(object)
+        sink.OnDelete(object)
     }
 }
 
@@ -102,6 +107,7 @@ func (in *informer[T]) Get(name string, obj *T) (err error) {
 func (in *informer[T]) AddEventHandler(handler EventHandler[T]) (err error) {
     if handler == nil {
         err = errors.New("handler can't be nil")
+        return
     }
     in.sinks = append(in.sinks, handler)
     return

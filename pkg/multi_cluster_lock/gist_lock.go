@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
@@ -57,7 +57,7 @@ func (gl *gistLock) Get(ctx context.Context) (record *resourcelock.LeaderElectio
 		return
 	}
 
-	// add a little random delay of up to 100 milliseconds seconds to prevent race conditions
+	// add a little random delay of up to 100 milliseconds to prevent race conditions
 	delay := time.Duration(100 * rand.Float64())
 	time.Sleep(delay * time.Millisecond)
 	return
@@ -153,7 +153,6 @@ func (gl *gistLock) Describe() string {
 }
 
 func NewGistLock(identity string, gistId string, accessToken string) (lock resourcelock.Interface, err error) {
-	rand.Seed(time.Now().UnixNano())
 	cli := NewGistClient(accessToken)
 	_, err = cli.Get(gistId)
 	if err != nil {

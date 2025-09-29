@@ -193,7 +193,7 @@ func NewWithContext(ctx context.Context, name string, options Options) (cluster 
 		if err != nil {
 			return
 		}
-		err = os.WriteFile(options.KubeConfigFile, []byte(kubeConfig), 0644)
+		err = os.WriteFile(options.KubeConfigFile, []byte(kubeConfig), 0600)
 	}()
 
 	// Create a new cluster if no cluster with the same name exists and return
