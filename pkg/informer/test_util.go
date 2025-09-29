@@ -3,13 +3,12 @@ package informer
 import (
 	"fmt"
 	. "github.com/onsi/gomega"
-	"github.com/the-gigi/kugo"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"strings"
-	"time"
-	"sync"
-
 	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"time"
 )
 
 const (
@@ -35,24 +34,24 @@ func getUniqueDeploymentName() string {
 // createDeployment deploy 3 replicas of the pause container and waits for deployment to be ready
 func createDeployment() string {
 	deploymentName := getUniqueDeploymentName()
-	cmd := fmt.Sprintf("create deployment %s --image %s --replicas 3 -n ns-1 --kubeconfig %s", deploymentName, testImage, kubeConfigFile)
-	_, err := kugo.Run(cmd)
+	cmd := exec.Command("kubectl", "create", "deployment", deploymentName, "--image", testImage, "--replicas", "3", "-n", "ns-1", "--kubeconfig", kubeConfigFile)
+	err := cmd.Run()
 	Ω(err).Should(BeNil())
 
 	// wait for the deployment to exist (otherwise the subsequent wait command might fail)
-	cmd = fmt.Sprintf("get deployment %s -n ns-1 --kubeconfig %s", deploymentName, kubeConfigFile)
 	var done = make(chan struct{})
-	var output string
 	wait.Until(func() {
-		output, err = kugo.Run(cmd)
+		cmd := exec.Command("kubectl", "get", "deployment", deploymentName, "-n", "ns-1", "--kubeconfig", kubeConfigFile)
+		outputBytes, err := cmd.CombinedOutput()
+		output := string(outputBytes)
 		if err != nil || strings.Contains(output, "not found") {
 			return
 		}
 		close(done)
 	}, time.Second, done)
 	// wait for deployment to be ready
-	cmd = fmt.Sprintf("wait deployment %s --for condition=Available=True --timeout 60s -n ns-1 --kubeconfig %s", deploymentName, kubeConfigFile)
-	_, err = kugo.Run(cmd)
+	cmd = exec.Command("kubectl", "wait", "deployment", deploymentName, "--for", "condition=Available=True", "--timeout", "60s", "-n", "ns-1", "--kubeconfig", kubeConfigFile)
+	err = cmd.Run()
 	Ω(err).Should(BeNil())
 
 	return deploymentName

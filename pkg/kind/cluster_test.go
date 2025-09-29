@@ -4,7 +4,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/the-gigi/kugo"
+	"os/exec"
 	"os"
 	"path"
 	//"os"
@@ -43,7 +43,8 @@ var _ = Describe("Cluster tests", Ordered, func() {
 
 	Context("Cluster creation and deletion tests", Ordered, func() {
 		AfterAll(func() {
-			_, err := kugo.Run("version --context kind-" + clusterName)
+			cmd := exec.Command("kubectl", "version", "--context", "kind-"+clusterName)
+			_, err := cmd.CombinedOutput()
 			if err == nil {
 				err = cluster.Delete()
 				Ω(err).To(BeNil())

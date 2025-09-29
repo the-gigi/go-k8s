@@ -6,7 +6,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
-	"github.com/the-gigi/kugo"
+	"os/exec"
 	"io/ioutil"
 	"os"
 	"path"
@@ -27,7 +27,7 @@ var _ = FDescribe("Kind Cluster Tests", Ordered, Serial, func() {
 	})
 
 	AfterAll(func() {
-		_, err := kugo.Run("get version --context kind-" + clusterName)
+		_, err := exec.Command("kubectl", get version --context kind-" + clusterName)
 		if err == nil {
 			err = theCluster.Delete()
 			Ω(err).Should(BeNil())
@@ -43,7 +43,6 @@ var _ = FDescribe("Kind Cluster Tests", Ordered, Serial, func() {
 
 		// Verify the theCluster is up and running
 		args := strings.Split("cluster-info --kubeconfig "+kubeConfigFile, " ")
-		output, err := kugo.Run(args...)
 		Ω(err).Should(BeNil())
 		Ω(output).Should(MatchRegexp(".*Kubernetes control plane.*is running at"))
 	})
@@ -102,7 +101,6 @@ var _ = FDescribe("Kind Cluster Tests", Ordered, Serial, func() {
 		Ω(err).Should(BeNil())
 		// Verify the theCluster is up and running and has nodes
 		args := strings.Split("cluster-info --kubeconfig "+kubeConfigFile, " ")
-		output, err := kugo.Run(args...)
 		Ω(err).Should(BeNil())
 		Ω(strings.Contains(output, "Kubernetes control plane is running at")).Should(BeTrue())
 	})

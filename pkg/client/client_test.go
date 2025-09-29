@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/suite"
 	"github.com/the-gigi/go-k8s/pkg/kind"
-	"github.com/the-gigi/kugo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"os"
+	"os/exec"
 	"path"
 	"testing"
 )
@@ -44,21 +44,23 @@ func (s *ClientTestSuite) SetupSuite() {
 	// Wait for node to be ready (CNI should be handled by Kind)
 	cmd := fmt.Sprintf(`wait --for=condition=ready node --all --timeout=120s --kubeconfig %s --context %s`, 
 		kubeConfigFile, c.GetKubeContext())
-	_, err = kugo.Run(cmd)
+	cmd := exec.Command("kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
+	err = cmd.Run()
 	s.Require().Nil(err)
 	
 	fmt.Println("Creating namespace and deploying pause container...")
 	// Delete namespace ns-1 if it exists, then create it
 	cmd = fmt.Sprintf("delete ns ns-1 --kubeconfig %s --context %s --ignore-not-found=true", kubeConfigFile, c.GetKubeContext())
-	_, _ = kugo.Run(cmd) // Ignore errors as namespace may not exist
 	
 	cmd = fmt.Sprintf("create ns ns-1 --kubeconfig %s --context %s", kubeConfigFile, c.GetKubeContext())
-	_, err = kugo.Run(cmd)
+	cmd := exec.Command("kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
+	err = cmd.Run()
 	s.Require().Nil(err)
 
 	cmd = fmt.Sprintf(`create deployment test-deployment --image %s --replicas 3 -n ns-1 --kubeconfig %s --context %s`, 
 		testImage, kubeConfigFile, c.GetKubeContext())
-	_, err = kugo.Run(cmd)
+	cmd := exec.Command("kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
+	err = cmd.Run()
 	s.Require().Nil(err)
 
 	fmt.Println("Waiting for deployment to be ready...")
@@ -67,7 +69,8 @@ func (s *ClientTestSuite) SetupSuite() {
 	                             -n ns-1
 	                             --kubeconfig %s
 	                             --context %s`, kubeConfigFile, c.GetKubeContext())
-	_, err = kugo.Run(cmd)
+	cmd := exec.Command("kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
+	err = cmd.Run()
 	s.Require().Nil(err)
 	fmt.Println("Setup suite is done.")
 }

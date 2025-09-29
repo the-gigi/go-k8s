@@ -2,11 +2,9 @@ package kind
 
 import (
 	"context"
-	"fmt"
 	"github.com/pkg/errors"
-	//"github.com/the-gigi/go-k8s/pkg/client"
-	"github.com/the-gigi/kugo"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -83,27 +81,20 @@ func (c *Cluster) GetKubeConfig() string {
 
 // Clear - delete all namespaces except the built-in namespaces
 func (c *Cluster) Clear() (err error) {
-	output, err := kugo.Get(kugo.GetRequest{
-		BaseRequest: kugo.BaseRequest{
-			KubeConfigFile: c.kubeConfigFile,
-			KubeContext:    c.GetKubeContext(),
-		},
-		Kind:   "ns",
-		Output: "name",
-	})
+	cmd := exec.Command("kubectl", "get", "ns", "-o", "name", "--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	outputBytes, err := cmd.CombinedOutput()
 	if err != nil {
-		return
+		return errors.Wrapf(err, "failed to get namespaces: %s", string(outputBytes))
 	}
 
-	output = strings.Replace(output, "namespace/", "", -1)
-	namespaces := strings.Split(output, "\n")
+	output := strings.Replace(string(outputBytes), "namespace/", "", -1)
+	namespaces := strings.Split(strings.TrimSpace(output), "\n")
 	for _, ns := range namespaces {
 		if !builtinNamespaces[ns] && ns != "" {
-			cmd := fmt.Sprintf("delete ns %s --kubeconfig %s --context %s", ns, c.kubeConfigFile, c.GetKubeContext())
-			output, err = kugo.Run(cmd)
+			cmd := exec.Command("kubectl", "delete", "ns", ns, "--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+			outputBytes, err := cmd.CombinedOutput()
 			if err != nil {
-				err = errors.Wrap(err, output)
-				return
+				return errors.Wrapf(err, "failed to delete namespace %s: %s", ns, string(outputBytes))
 			}
 		}
 	}
@@ -277,31 +268,35 @@ func (c *Cluster) LoadArchiveWithContext(ctx context.Context, archivePath string
 // ensureCNI installs and validates that CNI is working properly
 func (c *Cluster) ensureCNI(ctx context.Context) error {
 	// First check if CNI is already working by checking node status
-	output, err := kugo.Run("get", "nodes", "--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
-	if err == nil && strings.Contains(output, "Ready") {
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "nodes", "--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	outputBytes, err := cmd.CombinedOutput()
+	if err == nil && strings.Contains(string(outputBytes), "Ready") {
 		return nil // CNI is already working
 	}
-	
+
 	// Install Calico CNI (more reliable with Kind)
-	_, err = kugo.Run("apply", "-f", "https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/tigera-operator.yaml",
+	cmd = exec.CommandContext(ctx, "kubectl", "apply", "-f", "https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/tigera-operator.yaml",
 		"--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	outputBytes, err = cmd.CombinedOutput()
 	if err != nil {
-		return errors.Wrap(err, "failed to install Calico operator")
+		return errors.Wrapf(err, "failed to install Calico operator: %s", string(outputBytes))
 	}
-	
+
 	// Apply the Calico custom resources
-	_, err = kugo.Run("apply", "-f", "https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/custom-resources.yaml",
+	cmd = exec.CommandContext(ctx, "kubectl", "apply", "-f", "https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/custom-resources.yaml",
 		"--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	outputBytes, err = cmd.CombinedOutput()
 	if err != nil {
-		return errors.Wrap(err, "failed to install Calico")
+		return errors.Wrapf(err, "failed to install Calico: %s", string(outputBytes))
 	}
-	
+
 	// Wait for CNI to be ready and nodes to become Ready
-	_, err = kugo.Run("wait", "--for=condition=ready", "node", "--all", "--timeout=120s",
+	cmd = exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s",
 		"--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	outputBytes, err = cmd.CombinedOutput()
 	if err != nil {
-		return errors.Wrap(err, "nodes did not become ready after CNI installation")
+		return errors.Wrapf(err, "nodes did not become ready after CNI installation: %s", string(outputBytes))
 	}
-	
+
 	return nil
 }

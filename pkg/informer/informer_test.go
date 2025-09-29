@@ -5,10 +5,10 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/the-gigi/go-k8s/pkg/client"
 	"github.com/the-gigi/go-k8s/pkg/kind"
-	"github.com/the-gigi/kugo"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"os/exec"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -93,7 +93,8 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		Ω(err).Should(BeNil())
 
 		// Create namespace ns-1
-		_, err = kugo.Run("create ns ns-1 --kubeconfig " + cluster.GetKubeConfig())
+		cmd := exec.Command("kubectl", "create", "ns", "ns-1", "--kubeconfig", cluster.GetKubeConfig())
+		err = cmd.Run()
 		Ω(err).Should(BeNil())
 
 		var f Factory

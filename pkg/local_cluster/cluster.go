@@ -2,11 +2,10 @@ package local_cluster
 
 import (
 	"context"
-	"fmt"
 	"github.com/pkg/errors"
 	"github.com/the-gigi/go-k8s/pkg/client"
-	"github.com/the-gigi/kugo"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -66,27 +65,20 @@ func (c *cluster) GetKubeConfig() string {
 
 // Clear - delete all namespaces except the built-in namespaces
 func (c *cluster) Clear() (err error) {
-	output, err := kugo.Get(kugo.GetRequest{
-		BaseRequest: kugo.BaseRequest{
-			KubeConfigFile: c.kubeConfigFile,
-			KubeContext:    c.GetKubeContext(),
-		},
-		Kind:   "ns",
-		Output: "name",
-	})
+	cmd := exec.Command("kubectl", "get", "ns", "-o", "name", "--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+	outputBytes, err := cmd.CombinedOutput()
 	if err != nil {
-		return
+		return errors.Wrapf(err, "failed to get namespaces: %s", string(outputBytes))
 	}
 
-	output = strings.Replace(output, "namespace/", "", -1)
-	namespaces := strings.Split(output, "\n")
+	output := strings.Replace(string(outputBytes), "namespace/", "", -1)
+	namespaces := strings.Split(strings.TrimSpace(output), "\n")
 	for _, ns := range namespaces {
 		if !builtinNamespaces[ns] && ns != "" {
-			cmd := fmt.Sprintf("delete ns %s --kubeconfig %s --context %s", ns, c.kubeConfigFile, c.GetKubeContext())
-			output, err = kugo.Run(cmd)
+			cmd := exec.Command("kubectl", "delete", "ns", ns, "--kubeconfig", c.kubeConfigFile, "--context", c.GetKubeContext())
+			outputBytes, err := cmd.CombinedOutput()
 			if err != nil {
-				err = errors.Wrap(err, output)
-				return
+				return errors.Wrapf(err, "failed to delete namespace %s: %s", ns, string(outputBytes))
 			}
 		}
 	}

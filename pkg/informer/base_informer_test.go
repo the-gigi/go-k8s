@@ -5,11 +5,11 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/the-gigi/go-k8s/pkg/client"
 	"github.com/the-gigi/go-k8s/pkg/kind"
-	"github.com/the-gigi/kugo"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
+	"os/exec"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -51,9 +51,11 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		// Clear any remaining resources in the test namespace
 		if cluster != nil {
 			// Delete all deployments in ns-1
-			_, _ = kugo.Run("delete deployments --all -n ns-1 --kubeconfig " + cluster.GetKubeConfig())
+			cmd := exec.Command("kubectl", "delete", "deployments", "--all", "-n", "ns-1", "--kubeconfig", cluster.GetKubeConfig())
+			cmd.Run() // Ignore errors
 			// Delete all pods in ns-1
-			_, _ = kugo.Run("delete pods --all -n ns-1 --kubeconfig " + cluster.GetKubeConfig())
+			cmd = exec.Command("kubectl", "delete", "pods", "--all", "-n", "ns-1", "--kubeconfig", cluster.GetKubeConfig())
+			cmd.Run() // Ignore errors
 			// Wait for cleanup to complete
 			time.Sleep(300 * time.Millisecond)
 		}
@@ -67,7 +69,8 @@ var _ = Describe("Informer Tests", Ordered, func() {
 		time.Sleep(500 * time.Millisecond)
 
 		// Create namespace ns-1
-		_, err = kugo.Run("create ns ns-1 --kubeconfig " + cluster.GetKubeConfig())
+		cmd := exec.Command("kubectl", "create", "ns", "ns-1", "--kubeconfig", cluster.GetKubeConfig())
+		err = cmd.Run()
 		Ω(err).Should(BeNil())
 
 		// Create a fresh informer factory for each test to avoid shared state

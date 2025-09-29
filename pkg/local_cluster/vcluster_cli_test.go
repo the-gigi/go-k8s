@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/the-gigi/kugo"
+	"os/exec"
 	"os"
 	"path"
 	"strings"
@@ -70,7 +70,6 @@ var _ = Describe("VCluster CLI Tests", Ordered, Serial, func() {
 		Ω(clusters[0]).Should(Equal(clusterName))
 
 		args := strings.Split("cluster-info --kubeconfig "+kubeConfigFile, " ")
-		output, err := kugo.Run(args...)
 		Ω(output).Should(MatchRegexp(".*Kubernetes control plane.*is running at"))
 	})
 })

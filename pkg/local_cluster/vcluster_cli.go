@@ -3,7 +3,6 @@ package local_cluster
 import (
 	"encoding/json"
 	"github.com/pkg/errors"
-	"github.com/the-gigi/kugo"
 	"golang.org/x/net/context"
 	"os"
 	"os/exec"
@@ -101,7 +100,9 @@ func (c vclusterCLI) connect(ctx context.Context, clusterName string, kubeConfig
 			break
 		}
 		// check if cluster is running
-		output, currErr := kugo.Run("--kubeconfig", kubeConfigFile, "cluster-info")
+		cmd := exec.Command("kubectl", "--kubeconfig", kubeConfigFile, "cluster-info")
+		outputBytes, currErr := cmd.CombinedOutput()
+		output := string(outputBytes)
 		if currErr == nil && regex.MatchString(output) {
 			break
 		}
