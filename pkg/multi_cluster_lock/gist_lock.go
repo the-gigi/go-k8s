@@ -27,7 +27,6 @@ type gistLock struct {
 	// leaderelection calls Get/Update serially on one goroutine, so no mutex
 	// is needed to guard these fields.
 	cachedRecord *resourcelock.LeaderElectionRecord
-	cachedETag   string
 	cachedAt     time.Time
 }
 
@@ -36,27 +35,22 @@ var leaseResource = schema.GroupResource{
 	Resource: "Lease",
 }
 
-// translateError maps our transport-level errors into the errors the
-// leaderelection package knows how to interpret. Rate limit and other
-// transient/unknown errors are passed through unchanged so leaderelection
-// logs them and retries on the next tick, rather than treating a rate-limit
-// as "the lease disappeared, let me recreate it" (which makes the storm
-// worse).
+// translateError maps transport-level errors into errors the leaderelection
+// package understands. NotFound becomes k8s NewNotFound. Rate limit and
+// other transient errors are passed through so leaderelection logs and
+// retries on the next tick, rather than treating a 403 as "the lease
+// disappeared, recreate it" — which is what makes an API storm worse.
 func (gl *gistLock) translateError(err error) error {
 	var nf *NotFoundError
 	if errors.As(err, &nf) {
 		return apierrors.NewNotFound(leaseResource, gl.gistId)
 	}
-	var pf *PreconditionFailedError
-	if errors.As(err, &pf) {
-		return apierrors.NewConflict(leaseResource, gl.gistId, err)
-	}
 	return err
 }
 
-// Get returns the current LeaderElectionRecord. It uses a short-lived local
-// cache so back-to-back Get/Update within a single leaderelection tick does
-// not cost two API calls.
+// Get returns the current LeaderElectionRecord. A short-lived local cache
+// avoids a second round-trip when leaderelection calls Get() and Update()
+// back-to-back in a single tick.
 func (gl *gistLock) Get(ctx context.Context) (*resourcelock.LeaderElectionRecord, []byte, error) {
 	if gl.cachedRecord != nil && time.Since(gl.cachedAt) < cacheTTL {
 		bytes, err := json.Marshal(gl.cachedRecord)
@@ -66,7 +60,7 @@ func (gl *gistLock) Get(ctx context.Context) (*resourcelock.LeaderElectionRecord
 		return gl.cachedRecord, bytes, nil
 	}
 
-	data, etag, err := gl.cli.Get(gl.gistId)
+	data, err := gl.cli.Get(gl.gistId)
 	if err != nil {
 		return nil, nil, gl.translateError(err)
 	}
@@ -82,7 +76,6 @@ func (gl *gistLock) Get(ctx context.Context) (*resourcelock.LeaderElectionRecord
 	}
 
 	gl.cachedRecord = &record
-	gl.cachedETag = etag
 	gl.cachedAt = time.Now()
 	return &record, bytes, nil
 }
@@ -90,39 +83,62 @@ func (gl *gistLock) Get(ctx context.Context) (*resourcelock.LeaderElectionRecord
 // Create attempts to create a LeaderElectionRecord. For a gist-backed lock
 // the gist always exists, so Create reduces to an unconditional Update.
 func (gl *gistLock) Create(ctx context.Context, ler resourcelock.LeaderElectionRecord) error {
-	return gl.write(ler, "")
+	return gl.write(ctx, ler)
 }
 
-// Update writes a LeaderElectionRecord using an If-Match precondition when we
-// have a cached ETag. A 412 response means another writer got in first, and
-// we surface that as a Conflict — leaderelection treats that as "I am not
-// the leader, back off". The old implementation's read-then-sleep-then-reread
-// dance is no longer needed because the server now enforces the race for us.
+// Update writes a LeaderElectionRecord.
+//
+// GitHub's gist API does not support If-Match on PATCH, so this is a
+// last-writer-wins write. To detect races safely, when we are taking the
+// lock over from a different holder we re-read the gist after a short pause
+// and return a Conflict if someone else won the race.
 func (gl *gistLock) Update(ctx context.Context, ler resourcelock.LeaderElectionRecord) error {
 	ler.RenewTime = metav1.NewTime(time.Now())
-	return gl.write(ler, gl.cachedETag)
+
+	priorHolder := ""
+	if gl.cachedRecord != nil {
+		priorHolder = gl.cachedRecord.HolderIdentity
+	}
+
+	if err := gl.write(ctx, ler); err != nil {
+		return err
+	}
+
+	// Renewing our own lease is the hot path; no race to resolve.
+	if priorHolder == ler.HolderIdentity {
+		return nil
+	}
+
+	// Taking over from someone else: let the race settle and confirm.
+	time.Sleep(200 * time.Millisecond)
+	gl.invalidate()
+	current, _, err := gl.Get(ctx)
+	if err != nil {
+		return err
+	}
+	if current.HolderIdentity != ler.HolderIdentity {
+		return apierrors.NewConflict(leaseResource, gl.gistId, errors.New("another writer won the race"))
+	}
+	return nil
 }
 
-func (gl *gistLock) write(ler resourcelock.LeaderElectionRecord, ifMatch string) error {
+func (gl *gistLock) write(ctx context.Context, ler resourcelock.LeaderElectionRecord) error {
 	recordBytes, err := json.Marshal(ler)
 	if err != nil {
 		return err
 	}
-
-	newETag, err := gl.cli.Update(gl.gistId, string(recordBytes), ifMatch)
-	if err != nil {
-		// Conflict or transient error: drop the cache so the next Get() pulls
-		// fresh state instead of reusing a stale ETag.
-		gl.cachedRecord = nil
-		gl.cachedETag = ""
-		gl.cachedAt = time.Time{}
+	if err := gl.cli.Update(gl.gistId, string(recordBytes)); err != nil {
+		gl.invalidate()
 		return gl.translateError(err)
 	}
-
 	gl.cachedRecord = &ler
-	gl.cachedETag = newETag
 	gl.cachedAt = time.Now()
 	return nil
+}
+
+func (gl *gistLock) invalidate() {
+	gl.cachedRecord = nil
+	gl.cachedAt = time.Time{}
 }
 
 func (gl *gistLock) RecordEvent(string) {}
@@ -137,7 +153,7 @@ func (gl *gistLock) Describe() string {
 
 func NewGistLock(identity, gistId, accessToken string) (resourcelock.Interface, error) {
 	cli := NewGistClient(accessToken)
-	if _, _, err := cli.Get(gistId); err != nil {
+	if _, err := cli.Get(gistId); err != nil {
 		return nil, err
 	}
 	return &gistLock{

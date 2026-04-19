@@ -28,43 +28,28 @@ var _ = Describe("GistClient", func() {
 	})
 
 	It("should get private gist", func() {
-		data, etag, err := cli.Get(privateGistId)
+		data, err := cli.Get(privateGistId)
 		Ω(err).Should(BeNil())
 		Ω(data).Should(Equal("secret"))
-		Ω(etag).ShouldNot(BeEmpty())
 	})
 
-	It("should update private gist using an If-Match etag", func() {
-		data, etag, err := cli.Get(privateGistId)
+	It("should update private gist", func() {
+		data, err := cli.Get(privateGistId)
 		Ω(err).Should(BeNil())
 		Ω(data).Should(Equal("secret"))
-		Ω(etag).ShouldNot(BeEmpty())
 
-		newETag, err := cli.Update(privateGistId, "secret2", etag)
+		err = cli.Update(privateGistId, "secret2")
 		Ω(err).Should(BeNil())
-		Ω(newETag).ShouldNot(BeEmpty())
 
-		data, etag, err = cli.Get(privateGistId)
+		data, err = cli.Get(privateGistId)
 		Ω(err).Should(BeNil())
 		Ω(data).Should(Equal("secret2"))
 
-		_, err = cli.Update(privateGistId, "secret", etag)
+		err = cli.Update(privateGistId, "secret")
 		Ω(err).Should(BeNil())
 
-		data, _, err = cli.Get(privateGistId)
+		data, err = cli.Get(privateGistId)
 		Ω(err).Should(BeNil())
 		Ω(data).Should(Equal("secret"))
-	})
-
-	It("should reject an Update when the If-Match etag is stale", func() {
-		_, etag, err := cli.Get(privateGistId)
-		Ω(err).Should(BeNil())
-
-		_, err = cli.Update(privateGistId, "secret", etag)
-		Ω(err).Should(BeNil())
-
-		_, err = cli.Update(privateGistId, "stale", etag)
-		_, isPreconditionFailed := err.(*PreconditionFailedError)
-		Ω(isPreconditionFailed).Should(BeTrue())
 	})
 })

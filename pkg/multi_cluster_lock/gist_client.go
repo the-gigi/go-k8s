@@ -31,12 +31,6 @@ func (e *RateLimitError) Error() string {
 	return fmt.Sprintf("github rate limited (status %d, resets in %s)", e.Status, wait)
 }
 
-// PreconditionFailedError is returned when an If-Match PATCH loses a race
-// (another writer updated the gist first).
-type PreconditionFailedError struct{}
-
-func (e *PreconditionFailedError) Error() string { return "gist precondition failed (another writer won)" }
-
 // NotFoundError is returned when the gist does not exist.
 type NotFoundError struct{ ID string }
 
@@ -104,8 +98,6 @@ func (gc *GistClient) checkStatus(resp *http.Response, body []byte) error {
 		return nil
 	case http.StatusNotFound:
 		return &NotFoundError{}
-	case http.StatusPreconditionFailed:
-		return &PreconditionFailedError{}
 	case http.StatusForbidden, http.StatusTooManyRequests:
 		reset := parseResetAt(resp.Header, time.Now())
 		gc.recordRateLimit(reset)
@@ -115,8 +107,8 @@ func (gc *GistClient) checkStatus(resp *http.Response, body []byte) error {
 	}
 }
 
-// get fetches the raw gist JSON plus the response ETag.
-func (gc *GistClient) get(id string) (obj map[string]any, etag string, err error) {
+// get fetches the raw gist JSON.
+func (gc *GistClient) get(id string) (obj map[string]any, err error) {
 	if err = gc.blockedUntilRateLimitClears(); err != nil {
 		return
 	}
@@ -136,15 +128,17 @@ func (gc *GistClient) get(id string) (obj map[string]any, etag string, err error
 	if err = gc.checkStatus(resp, body); err != nil {
 		return
 	}
-	etag = resp.Header.Get("ETag")
 	err = json.Unmarshal(body, &obj)
 	return
 }
 
-// update PATCHes the gist with the given payload. If ifMatch is non-empty it
-// is sent as the If-Match header, so the server rejects the write if the gist
-// has changed since that ETag was observed.
-func (gc *GistClient) update(id string, obj map[string]any, ifMatch string) (newETag string, err error) {
+// update PATCHes the gist with the given payload.
+//
+// GitHub's gist PATCH does not support If-Match (the API returns 400
+// "Conditional request headers are not allowed in unsafe requests"), so this
+// is a last-writer-wins write. The caller detects races after the fact by
+// re-reading the gist.
+func (gc *GistClient) update(id string, obj map[string]any) (err error) {
 	if err = gc.blockedUntilRateLimitClears(); err != nil {
 		return
 	}
@@ -156,9 +150,6 @@ func (gc *GistClient) update(id string, obj map[string]any, ifMatch string) (new
 	if err != nil {
 		return
 	}
-	if ifMatch != "" {
-		req.Header.Set("If-Match", ifMatch)
-	}
 	resp, err := gc.cli.Do(req)
 	if err != nil {
 		return
@@ -168,16 +159,12 @@ func (gc *GistClient) update(id string, obj map[string]any, ifMatch string) (new
 	if err != nil {
 		return
 	}
-	if err = gc.checkStatus(resp, body); err != nil {
-		return
-	}
-	newETag = resp.Header.Get("ETag")
-	return
+	return gc.checkStatus(resp, body)
 }
 
-// Get returns the content of the first file in the gist plus the response ETag.
-func (gc *GistClient) Get(id string) (data, etag string, err error) {
-	obj, etag, err := gc.get(id)
+// Get returns the content of the first file in the gist.
+func (gc *GistClient) Get(id string) (data string, err error) {
+	obj, err := gc.get(id)
 	if err != nil {
 		return
 	}
@@ -203,10 +190,10 @@ func (gc *GistClient) Get(id string) (data, etag string, err error) {
 	return
 }
 
-// Update writes data to the first file in the gist. If ifMatch is non-empty,
-// the write only succeeds if the gist's ETag still matches.
-func (gc *GistClient) Update(id, data, ifMatch string) (newETag string, err error) {
-	gist, _, err := gc.get(id)
+// Update writes data to the first file in the gist. This is a
+// last-writer-wins operation; the caller must read back to detect races.
+func (gc *GistClient) Update(id, data string) (err error) {
+	gist, err := gc.get(id)
 	if err != nil {
 		return
 	}
@@ -217,7 +204,7 @@ func (gc *GistClient) Update(id, data, ifMatch string) (newETag string, err erro
 		m["content"] = data
 		break
 	}
-	return gc.update(id, gist, ifMatch)
+	return gc.update(id, gist)
 }
 
 func NewGistClient(accessToken string) *GistClient {
