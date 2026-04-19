@@ -42,34 +42,26 @@ func (s *ClientTestSuite) SetupSuite() {
 	
 	fmt.Println("Waiting for cluster to be ready...")
 	// Wait for node to be ready (CNI should be handled by Kind)
-	cmd := fmt.Sprintf(`wait --for=condition=ready node --all --timeout=120s --kubeconfig %s --context %s`, 
-		kubeConfigFile, c.GetKubeContext())
 	cmd := exec.Command("kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
 	err = cmd.Run()
 	s.Require().Nil(err)
 	
 	fmt.Println("Creating namespace and deploying pause container...")
 	// Delete namespace ns-1 if it exists, then create it
-	cmd = fmt.Sprintf("delete ns ns-1 --kubeconfig %s --context %s --ignore-not-found=true", kubeConfigFile, c.GetKubeContext())
-	
-	cmd = fmt.Sprintf("create ns ns-1 --kubeconfig %s --context %s", kubeConfigFile, c.GetKubeContext())
-	cmd := exec.Command("kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
+	cmd = exec.Command("kubectl", "delete", "ns", "ns-1", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext(), "--ignore-not-found=true")
+	cmd.Run() // Ignore errors
+
+	cmd = exec.Command("kubectl", "create", "ns", "ns-1", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
 	err = cmd.Run()
 	s.Require().Nil(err)
 
-	cmd = fmt.Sprintf(`create deployment test-deployment --image %s --replicas 3 -n ns-1 --kubeconfig %s --context %s`, 
-		testImage, kubeConfigFile, c.GetKubeContext())
-	cmd := exec.Command("kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
+	cmd = exec.Command("kubectl", "create", "deployment", "test-deployment", "--image", testImage, "--replicas", "3", "-n", "ns-1", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
 	err = cmd.Run()
 	s.Require().Nil(err)
 
 	fmt.Println("Waiting for deployment to be ready...")
 	// wait for deployment to be ready
-	cmd = fmt.Sprintf(`wait deployment test-deployment --for condition=Available=True --timeout 60s
-	                             -n ns-1
-	                             --kubeconfig %s
-	                             --context %s`, kubeConfigFile, c.GetKubeContext())
-	cmd := exec.Command("kubectl", "wait", "--for=condition=ready", "node", "--all", "--timeout=120s", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
+	cmd = exec.Command("kubectl", "wait", "deployment", "test-deployment", "--for", "condition=Available=True", "--timeout", "60s", "-n", "ns-1", "--kubeconfig", kubeConfigFile, "--context", c.GetKubeContext())
 	err = cmd.Run()
 	s.Require().Nil(err)
 	fmt.Println("Setup suite is done.")

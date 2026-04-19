@@ -16,3 +16,6 @@
 
 # Environment files
 .env
+
+# Stray build output (e.g., go run on ./examples/*.go)
+/complete_workflow

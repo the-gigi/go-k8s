@@ -69,7 +69,9 @@ var _ = Describe("VCluster CLI Tests", Ordered, Serial, func() {
 		Ω(clusters).Should(HaveLen(1))
 		Ω(clusters[0]).Should(Equal(clusterName))
 
-		args := strings.Split("cluster-info --kubeconfig "+kubeConfigFile, " ")
-		Ω(output).Should(MatchRegexp(".*Kubernetes control plane.*is running at"))
+		args := append([]string{"cluster-info"}, strings.Split("--kubeconfig "+kubeConfigFile, " ")...)
+		out, err := exec.Command("kubectl", args...).CombinedOutput()
+		Ω(err).Should(BeNil())
+		Ω(string(out)).Should(MatchRegexp(".*Kubernetes control plane.*is running at"))
 	})
 })

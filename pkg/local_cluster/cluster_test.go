@@ -27,7 +27,8 @@ var _ = FDescribe("Kind Cluster Tests", Ordered, Serial, func() {
 	})
 
 	AfterAll(func() {
-		_, err := exec.Command("kubectl", get version --context kind-" + clusterName)
+		cmd := exec.Command("kubectl", "get", "version", "--context", "kind-"+clusterName)
+		_, err := cmd.CombinedOutput()
 		if err == nil {
 			err = theCluster.Delete()
 			Ω(err).Should(BeNil())
@@ -42,9 +43,10 @@ var _ = FDescribe("Kind Cluster Tests", Ordered, Serial, func() {
 		Ω(theCluster).ShouldNot(BeNil())
 
 		// Verify the theCluster is up and running
-		args := strings.Split("cluster-info --kubeconfig "+kubeConfigFile, " ")
+		args := append([]string{"cluster-info"}, strings.Split("--kubeconfig "+kubeConfigFile, " ")...)
+		out, err := exec.Command("kubectl", args...).CombinedOutput()
 		Ω(err).Should(BeNil())
-		Ω(output).Should(MatchRegexp(".*Kubernetes control plane.*is running at"))
+		Ω(string(out)).Should(MatchRegexp(".*Kubernetes control plane.*is running at"))
 	})
 
 	It("should fail to create existing theCluster with no options", func() {
@@ -100,9 +102,10 @@ var _ = FDescribe("Kind Cluster Tests", Ordered, Serial, func() {
 		theCluster, err = newCluster("kind", clusterName, Options{Recreate: true})
 		Ω(err).Should(BeNil())
 		// Verify the theCluster is up and running and has nodes
-		args := strings.Split("cluster-info --kubeconfig "+kubeConfigFile, " ")
+		args := append([]string{"cluster-info"}, strings.Split("--kubeconfig "+kubeConfigFile, " ")...)
+		out, err := exec.Command("kubectl", args...).CombinedOutput()
 		Ω(err).Should(BeNil())
-		Ω(strings.Contains(output, "Kubernetes control plane is running at")).Should(BeTrue())
+		Ω(strings.Contains(string(out), "Kubernetes control plane is running at")).Should(BeTrue())
 	})
 
 	It("should delete a cluster successfully", func() {
