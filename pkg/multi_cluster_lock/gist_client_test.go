@@ -16,42 +16,55 @@ var _ = Describe("GistClient", func() {
 	var cli *GistClient
 
 	BeforeEach(func() {
-		// Try to load .env file from project root (walk up directories to find it)
 		_ = godotenv.Load("../../.env")
-		
-		// Get GitHub token from environment variable
+
 		token := os.Getenv("GITHUB_API_TOKEN")
 		if token == "" {
 			Skip("GITHUB_API_TOKEN not set in environment or .env file - skipping integration tests")
 		}
-		
+
 		cli = NewGistClient(token)
 		Ω(cli).ShouldNot(BeNil())
 	})
 
 	It("should get private gist", func() {
-		data, err := cli.Get(privateGistId)
+		data, etag, err := cli.Get(privateGistId)
+		Ω(err).Should(BeNil())
+		Ω(data).Should(Equal("secret"))
+		Ω(etag).ShouldNot(BeEmpty())
+	})
+
+	It("should update private gist using an If-Match etag", func() {
+		data, etag, err := cli.Get(privateGistId)
+		Ω(err).Should(BeNil())
+		Ω(data).Should(Equal("secret"))
+		Ω(etag).ShouldNot(BeEmpty())
+
+		newETag, err := cli.Update(privateGistId, "secret2", etag)
+		Ω(err).Should(BeNil())
+		Ω(newETag).ShouldNot(BeEmpty())
+
+		data, etag, err = cli.Get(privateGistId)
+		Ω(err).Should(BeNil())
+		Ω(data).Should(Equal("secret2"))
+
+		_, err = cli.Update(privateGistId, "secret", etag)
+		Ω(err).Should(BeNil())
+
+		data, _, err = cli.Get(privateGistId)
 		Ω(err).Should(BeNil())
 		Ω(data).Should(Equal("secret"))
 	})
 
-	It("should update private gist", func() {
-		data, err := cli.Get(privateGistId)
-		Ω(err).Should(BeNil())
-		Ω(data).Should(Equal("secret"))
-
-		err = cli.Update(privateGistId, "secret2")
+	It("should reject an Update when the If-Match etag is stale", func() {
+		_, etag, err := cli.Get(privateGistId)
 		Ω(err).Should(BeNil())
 
-		data, err = cli.Get(privateGistId)
-		Ω(err).Should(BeNil())
-		Ω(data).Should(Equal("secret2"))
-
-		err = cli.Update(privateGistId, "secret")
+		_, err = cli.Update(privateGistId, "secret", etag)
 		Ω(err).Should(BeNil())
 
-		data, err = cli.Get(privateGistId)
-		Ω(err).Should(BeNil())
-		Ω(data).Should(Equal("secret"))
+		_, err = cli.Update(privateGistId, "stale", etag)
+		_, isPreconditionFailed := err.(*PreconditionFailedError)
+		Ω(isPreconditionFailed).Should(BeTrue())
 	})
 })

@@ -3,166 +3,146 @@ package multi_cluster_lock
 import (
 	"context"
 	"encoding/json"
-	pkgerrors "github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/api/errors"
+	"errors"
+	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
-	"math/rand/v2"
-	"time"
 )
+
+// cacheTTL is how long the last-observed record is trusted without re-fetching.
+// Kept short so a Get() after losing the lease still sees fresh state quickly,
+// but long enough to skip a round-trip when leaderelection calls Get() and then
+// Update() back-to-back within a single tick.
+const cacheTTL = 500 * time.Millisecond
 
 type gistLock struct {
 	identity string
 	gistId   string
 	cli      *GistClient
+
+	// cached state from the last successful Get or Update.
+	// leaderelection calls Get/Update serially on one goroutine, so no mutex
+	// is needed to guard these fields.
+	cachedRecord *resourcelock.LeaderElectionRecord
+	cachedETag   string
+	cachedAt     time.Time
 }
 
-func gistToLeaderElectionRecord(gist []byte) (record *resourcelock.LeaderElectionRecord, err error) {
-	var rel resourcelock.LeaderElectionRecord
-	err = json.Unmarshal(gist, &rel)
-	if err != nil {
-		return
+var leaseResource = schema.GroupResource{
+	Group:    "coordination.k8s.io",
+	Resource: "Lease",
+}
+
+// translateError maps our transport-level errors into the errors the
+// leaderelection package knows how to interpret. Rate limit and other
+// transient/unknown errors are passed through unchanged so leaderelection
+// logs them and retries on the next tick, rather than treating a rate-limit
+// as "the lease disappeared, let me recreate it" (which makes the storm
+// worse).
+func (gl *gistLock) translateError(err error) error {
+	var nf *NotFoundError
+	if errors.As(err, &nf) {
+		return apierrors.NewNotFound(leaseResource, gl.gistId)
 	}
-
-	record = &rel
-	return
+	var pf *PreconditionFailedError
+	if errors.As(err, &pf) {
+		return apierrors.NewConflict(leaseResource, gl.gistId, err)
+	}
+	return err
 }
 
-// Get returns the LeaderElectionRecord
-func (gl *gistLock) Get(ctx context.Context) (record *resourcelock.LeaderElectionRecord, recordBytes []byte, err error) {
-	defer func() {
-		// Convert any error to NotFound, which is what the leader election can work with
+// Get returns the current LeaderElectionRecord. It uses a short-lived local
+// cache so back-to-back Get/Update within a single leaderelection tick does
+// not cost two API calls.
+func (gl *gistLock) Get(ctx context.Context) (*resourcelock.LeaderElectionRecord, []byte, error) {
+	if gl.cachedRecord != nil && time.Since(gl.cachedAt) < cacheTTL {
+		bytes, err := json.Marshal(gl.cachedRecord)
 		if err != nil {
-			qualifiedResource := schema.GroupResource{
-				Group:    "coordination.k8s.io",
-				Resource: "Lease",
-			}
-			err = errors.NewNotFound(qualifiedResource, gl.gistId)
-			return
+			return nil, nil, err
 		}
-	}()
-	gist, err := gl.cli.Get(gl.gistId)
-	if err != nil {
-		return
+		return gl.cachedRecord, bytes, nil
 	}
 
-	record, err = gistToLeaderElectionRecord([]byte(gist))
+	data, etag, err := gl.cli.Get(gl.gistId)
 	if err != nil {
-		return
+		return nil, nil, gl.translateError(err)
 	}
 
-	recordBytes, err = json.Marshal(*record)
-	if err != nil {
-		return
+	var record resourcelock.LeaderElectionRecord
+	if err := json.Unmarshal([]byte(data), &record); err != nil {
+		return nil, nil, err
 	}
 
-	// add a little random delay of up to 100 milliseconds to prevent race conditions
-	delay := time.Duration(100 * rand.Float64())
-	time.Sleep(delay * time.Millisecond)
-	return
+	bytes, err := json.Marshal(record)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	gl.cachedRecord = &record
+	gl.cachedETag = etag
+	gl.cachedAt = time.Now()
+	return &record, bytes, nil
 }
 
-// Create attempts to create a LeaderElectionRecord
-func (gl *gistLock) Create(ctx context.Context, ler resourcelock.LeaderElectionRecord) (err error) {
-	return gl.Update(ctx, ler)
+// Create attempts to create a LeaderElectionRecord. For a gist-backed lock
+// the gist always exists, so Create reduces to an unconditional Update.
+func (gl *gistLock) Create(ctx context.Context, ler resourcelock.LeaderElectionRecord) error {
+	return gl.write(ler, "")
 }
 
-// Update will update an existing LeaderElectionRecord if not held by another actor
-func (gl *gistLock) Update(ctx context.Context, ler resourcelock.LeaderElectionRecord) (err error) {
-	oldLer, _, err := gl.Get(ctx)
-	if err != nil {
-		return
-	}
+// Update writes a LeaderElectionRecord using an If-Match precondition when we
+// have a cached ETag. A 412 response means another writer got in first, and
+// we surface that as a Conflict — leaderelection treats that as "I am not
+// the leader, back off". The old implementation's read-then-sleep-then-reread
+// dance is no longer needed because the server now enforces the race for us.
+func (gl *gistLock) Update(ctx context.Context, ler resourcelock.LeaderElectionRecord) error {
+	ler.RenewTime = metav1.NewTime(time.Now())
+	return gl.write(ler, gl.cachedETag)
+}
 
-	// If lock is held by another actor and has not expired yet return an error
-	if oldLer.HolderIdentity != ler.HolderIdentity {
-		now := time.Now()
-		leaseDuration := time.Duration(oldLer.LeaseDurationSeconds) * time.Second
-		validUntil := oldLer.RenewTime.Add(leaseDuration)
-		leaseStillValid := validUntil.After(now)
-		if leaseStillValid {
-			qualifiedResource := schema.GroupResource{
-				Group:    "coordination.k8s.io",
-				Resource: "Lease",
-			}
-			err = errors.NewConflict(qualifiedResource, gl.gistId, pkgerrors.New("lease is still valid"))
-			return
-		}
-	}
-
-	// Update lock
+func (gl *gistLock) write(ler resourcelock.LeaderElectionRecord, ifMatch string) error {
 	recordBytes, err := json.Marshal(ler)
 	if err != nil {
-		return
+		return err
 	}
 
-	err = gl.cli.Update(gl.gistId, string(recordBytes))
+	newETag, err := gl.cli.Update(gl.gistId, string(recordBytes), ifMatch)
 	if err != nil {
-		return
+		// Conflict or transient error: drop the cache so the next Get() pulls
+		// fresh state instead of reusing a stale ETag.
+		gl.cachedRecord = nil
+		gl.cachedETag = ""
+		gl.cachedAt = time.Time{}
+		return gl.translateError(err)
 	}
 
-	// If the lock was held by another leader ,wait for half of the renew period
-	// and check if the leader has changed or not.
-	// If the leader has changed then let them be the leader by returning an eror
-	// However, if we are still the leader then update again to refresh the lease
-	var curLer *resourcelock.LeaderElectionRecord
-	if len(oldLer.HolderIdentity) == 0 || oldLer.HolderIdentity != ler.HolderIdentity {
-		leaseDuration := time.Duration(ler.LeaseDurationSeconds) * time.Second
-		time.Sleep(leaseDuration - time.Second)
-		// Check current holder
-		curLer, _, err = gl.Get(ctx)
-		if err != nil {
-			return
-		}
-
-		if curLer.HolderIdentity != ler.HolderIdentity {
-			qualifiedResource := schema.GroupResource{
-				Group:    "coordination.k8s.io",
-				Resource: "Lease",
-			}
-			err = errors.NewConflict(qualifiedResource, gl.gistId, pkgerrors.New("there is a new leader"))
-			return
-		}
-
-		// Update renew time
-		ler.RenewTime = metav1.Time{time.Now()}
-
-		// Update LER again
-		ler.RenewTime = metav1.Time{time.Now()}
-		err = gl.Update(ctx, ler)
-	}
-
-	return
+	gl.cachedRecord = &ler
+	gl.cachedETag = newETag
+	gl.cachedAt = time.Now()
+	return nil
 }
 
-// RecordEvent is used to record events. Not used by gist lock
-func (gl *gistLock) RecordEvent(string) {
+func (gl *gistLock) RecordEvent(string) {}
 
-}
-
-// Identity will return the locks Identity
 func (gl *gistLock) Identity() string {
 	return gl.identity
 }
 
-// Describe is used to convert details on current resource lock
-// into a string
 func (gl *gistLock) Describe() string {
 	return "Github gist lock: " + gl.identity
 }
 
-func NewGistLock(identity string, gistId string, accessToken string) (lock resourcelock.Interface, err error) {
+func NewGistLock(identity, gistId, accessToken string) (resourcelock.Interface, error) {
 	cli := NewGistClient(accessToken)
-	_, err = cli.Get(gistId)
-	if err != nil {
-		return
+	if _, _, err := cli.Get(gistId); err != nil {
+		return nil, err
 	}
-
-	lock = &gistLock{
+	return &gistLock{
 		identity: identity,
 		gistId:   gistId,
 		cli:      cli,
-	}
-	return
+	}, nil
 }
