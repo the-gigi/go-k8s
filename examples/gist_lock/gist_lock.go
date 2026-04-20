@@ -1,4 +1,27 @@
-package multi_cluster_lock
+// Package gist_lock is a reference implementation of client-go's
+// leaderelection [resourcelock.Interface] that uses a GitHub gist as the
+// shared store. It is intended as an example — NOT for production use.
+//
+// Why not production:
+//
+//   - GitHub's API has primary (5000/hr) and secondary (abuse-detection) rate
+//     limits. A real HA workload renewing every few seconds across multiple
+//     pods can burn through both.
+//   - GitHub's availability becomes part of your HA story. If api.github.com
+//     is down, lease renewals fail and leadership thrashes.
+//   - Gist PATCH is last-writer-wins; there is no conditional write on the
+//     server, so we detect races after the fact by re-reading.
+//
+// For production cross-cluster leader election, implement
+// [resourcelock.Interface] against a globally consistent store you already
+// operate (Spanner, DynamoDB with conditional writes, etcd, Consul, and so
+// on). This package is meant as the starting point for that kind of
+// implementation — see [NewGistLock], [gistLock.Get], and [gistLock.Update]
+// for the shape of a minimal custom lock.
+//
+// A working demo that uses this lock lives at
+// https://github.com/the-gigi/k8s-multi-cluster-leader-election.
+package gist_lock
 
 import (
 	"context"

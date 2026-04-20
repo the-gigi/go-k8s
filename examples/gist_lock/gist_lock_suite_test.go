@@ -1,4 +1,4 @@
-package multi_cluster_lock_test
+package gist_lock_test
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestMultiClusterLock(t *testing.T) {
+func TestGistLock(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "MultiClusterLock Suite")
+	RunSpecs(t, "GistLock Suite")
 }

@@ -1,5 +1,9 @@
 # go-k8s
-Various Kubernetes Go libraries, tools and services
+Various Kubernetes Go libraries, tools and services.
+
+## Examples
+
+- [`examples/gist_lock`](examples/gist_lock) — a reference implementation of client-go's `resourcelock.Interface` for cross-cluster leader election, backed by a GitHub gist. Demo / educational only. A full working demo that uses it is at [k8s-multi-cluster-leader-election](https://github.com/the-gigi/k8s-multi-cluster-leader-election).
 
 ## Usage
 
@@ -25,8 +29,8 @@ go build ./...
 ### Running Tests
 The project uses Ginkgo v2 for testing. 
 
-#### GitHub Token Setup (Required for multi_cluster_lock tests)
-The multi_cluster_lock tests require a GitHub API token to test Gist functionality. Set up your environment:
+#### GitHub Token Setup (Required for `examples/gist_lock` tests)
+The `examples/gist_lock` tests require a GitHub API token to test Gist functionality. Set up your environment:
 
 1. Create a `.env` file in the project root:
 ```bash
@@ -39,7 +43,7 @@ GITHUB_API_TOKEN=your_github_token_here
 ```
 
 3. Generate a GitHub personal access token at: https://github.com/settings/tokens
-   - Requires `gist` scope for the multi_cluster_lock tests
+   - Requires `gist` scope for the `examples/gist_lock` tests
 
 #### Running All Tests
 Run all tests with:
@@ -139,7 +143,7 @@ ginkgo -r
 - **kubectl**: Required for test setup/verification
 - **Docker**: Required for Kind cluster creation
 - **Kind**: Automatically managed by the library
-- **GitHub token**: Only required for multi_cluster_lock tests
+- **GitHub token**: Only required for `examples/gist_lock` tests
 
 This methodology ensures that:
 - Tests provide independent verification of functionality

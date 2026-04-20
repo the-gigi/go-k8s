@@ -1,4 +1,4 @@
-package multi_cluster_lock
+package gist_lock
 
 import (
 	"bytes"
